@@ -1,0 +1,7 @@
+*.txt
+*.png
+__pycache__/
+test_scripts/
+*.json
+.DS_Store
+output_text/
