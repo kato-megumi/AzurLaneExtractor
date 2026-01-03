@@ -217,10 +217,18 @@ class GameObjectLayer:
             size_delta = self.rect_transform.size_delta
             pivot = self.rect_transform.pivot
 
+            # Special fix for aotuo_3 face layer positioning issue (including variants like aotuo_3_hx)
+            adjusted_anchorpos_y = anchorpos[1]
+            if (self.gameobject.m_Name == 'face' and self.parent and 
+                self.parent.gameobject.m_Name.startswith('aotuo_3')):
+                # aotuo_3 has incorrect face anchored_position.y in Unity data
+                # Correct value should be -190 instead of -60
+                adjusted_anchorpos_y = -190.0
+
             if anchor_min == anchor_max:
                 # Point anchor - element positioned relative to anchor point
                 anchorposx = anchorpos[0] + (self.size[0] - size_delta[0]) * pivot[0]
-                anchorposy = anchorpos[1] + (self.size[1] - size_delta[1]) * (pivot[1] - 1)
+                anchorposy = adjusted_anchorpos_y + (self.size[1] - size_delta[1]) * (pivot[1] - 1)
                 adjusted_anchorpos = (anchorposx, anchorposy)
 
                 # Use parent size for children, or own size for root
@@ -327,10 +335,14 @@ class GameObjectLayer:
             
             # If base layer found, calculate proper offset through parent chain
             if base_layer and hasattr(base_layer, 'rect_transform'):
-                # Start from base layer's center (anchor point for its children)
-                # Base layer is at (0,0) in screen coords, so its center is:
-                current_x = base_layer.size[0] / 2
-                current_y = base_layer.size[1] / 2
+                # Start from base layer's position + center offset (anchor point for its children)
+                # Base layer might not be at (0,0), use its global_offset
+                base_x = base_layer.global_offset[0] if hasattr(base_layer, 'global_offset') else 0.0
+                base_y = base_layer.global_offset[1] if hasattr(base_layer, 'global_offset') else 0.0
+                current_x = base_x + base_layer.size[0] / 2
+                current_y = base_y + base_layer.size[1] / 2
+                
+                log.debug(f"_rw '{self.gameobject.m_Name}': base_layer '{base_layer.gameobject.m_Name}' at global_offset={base_layer.global_offset if hasattr(base_layer, 'global_offset') else 'N/A'}, starting from ({current_x}, {current_y})")
                 
                 # Walk up from _rw layer to base layer, collecting intermediate containers
                 containers = []
