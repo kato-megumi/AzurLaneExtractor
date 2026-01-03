@@ -12,7 +12,7 @@ from UnityPy.enums import ClassIDType
 from .asset import AzurlaneAsset
 from .layer import GameObjectLayer
 from .config import get_config
-from .constants import strip_variant_suffix
+from .name_map import Skin
 from .scaler import (
     reset_batch_scaler as _reset_batch_scaler,
     flush_batch_scaler,
@@ -49,22 +49,23 @@ def reset_state():
     _face_cache = {}
 
 
-def get_face_images(painting_name: str, asset_dir: Path) -> dict[str, Image.Image]:
+def get_face_images(skin: Skin) -> dict[str, Image.Image]:
     """Get face images for a painting. Caches by base name."""
-    base_name, _ = strip_variant_suffix(painting_name)
+    base_name = skin.painting
+    config = get_config()
     
     if base_name in _face_cache:
         return _face_cache[base_name]
     
     facebpath = Path("paintingface", base_name)
-    facefile = asset_dir / facebpath
+    facefile = config.asset_dir / facebpath
     
     if not facefile.exists():
         _face_cache[base_name] = {}
         return {}
     
     try:
-        fasset = AzurlaneAsset(asset_dir, facebpath)
+        fasset = AzurlaneAsset("paintingface", skin)
         faces = {}
         for unity_object in fasset.bundle.objects:
             if unity_object.type == ClassIDType.Texture2D:
@@ -137,51 +138,44 @@ def render_image(parent_goi: GameObjectLayer, facelayer: Optional[GameObjectLaye
     return canvas
 
 
-def process_painting_group(base_name: str, variants: list[str], asset_dir: Path):
+def process_painting_group(skin: Skin):
     """Process a painting and all its variants, reusing the base asset."""
+    # default_skin = skin.ship.default_skin() 
+    # base_name = default_skin.painting if default_skin else skin.painting
+    base_name = skin.painting
+    config = get_config()
+
     painting_subpath = Path("painting", base_name)
-    painting_file = asset_dir / painting_subpath
+    painting_file = config.asset_dir / painting_subpath
     
     if not painting_file.exists():
         log.debug(f"SKIP {base_name}: asset file not found")
         return
     
-    base_asset = AzurlaneAsset(asset_dir, painting_subpath)
-    base_asset.loadDependencies()
+    base_asset = AzurlaneAsset("painting", skin)
+    face_images = get_face_images(skin)
     
-    face_images = get_face_images(base_name, asset_dir)
-    
-    _process_single_painting(base_name, base_asset, face_images, asset_dir)
-    
-    for variant_name in variants:
-        if variant_name == base_name:
-            continue
-        
-        variant_subpath = Path("painting", variant_name)
-        variant_file = asset_dir / variant_subpath
-        if not variant_file.exists():
-            log.debug(f"SKIP {variant_name}: variant file not found")
-            continue
-        
-        variant_asset = AzurlaneAsset(asset_dir, variant_subpath)
-        variant_asset.bundle.load([str(asset_dir / painting_subpath)])
-        variant_asset.loadDependencies()
-        
-        _process_single_painting(variant_name, variant_asset, face_images, asset_dir)
+    _process_single_painting(skin, False, base_asset, face_images)
+    # todo: more robust censor handling, create censor w/o hx mesh
+    if skin.have_censor and skin.painting + "_hx" in skin.res_list:
+        base_asset_censored = AzurlaneAsset("painting", skin, is_censored=True)
+        _process_single_painting(skin, True, base_asset_censored, face_images)
 
 
-def _process_single_painting(painting_name: str, asset: AzurlaneAsset, 
-                             face_images: dict[str, Image.Image], asset_dir: Path):
+
+def _process_single_painting(skin: Skin, is_censored: bool, asset: AzurlaneAsset, 
+                             face_images: dict[str, Image.Image]):
     """Process a single painting variant."""
+    painting_name = skin.painting + ("_hx" if is_censored else "")
     config = get_config()
     
     try:
-        if config.ship_collection:
-            display_name = config.ship_collection.get_display_name(painting_name)
-            char_name, skin_name = config.ship_collection.get_char_and_skin_name(painting_name)
-        else:
-            display_name = painting_name
-            char_name, skin_name = painting_name, painting_name
+        display_name = skin.display_name()
+        if is_censored:
+            display_name = f"{display_name} (Censored)"
+        
+        char_name = skin.ship.name if skin.ship else skin.name
+        skin_name = display_name
         
         if display_name != painting_name:
             log.debug(f"NAME_MAP {painting_name} -> {display_name}")

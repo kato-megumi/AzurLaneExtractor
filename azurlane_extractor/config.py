@@ -22,8 +22,8 @@ class Config:
     """Global configuration."""
     debug: bool = False
     external_scaler: Optional[str] = None
+    asset_dir: Path = field(default_factory=lambda: Path("."))
     output_dir: Path = field(default_factory=lambda: Path("."))
-    extract_no_bg: bool = False  # Extract _n (no background) variants
     save_layers: bool = False  # Save intermediate layers (debug)
     ship_collection: Optional[object] = None
 

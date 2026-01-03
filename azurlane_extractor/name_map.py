@@ -5,14 +5,16 @@ from typing import List, Optional, Tuple, Dict
 
 from requests_cache import CachedSession
 
-from .constants import NAME_MAP_CACHE, VARIANT_LABELS, strip_variant_suffix
+from .constants import (
+    CACHE_NAME,
+    SHIP_SKIN_URL,
+    SKIN_PAINTING_URL,
+    PAINTING_MAP_URL,
+)
 from .config import get_config
 
 log = logging.getLogger(__name__)
 
-SHIP_SKIN_URL = "https://raw.githubusercontent.com/Fernando2603/AzurLane/main/ship_skin_list.json"
-SKIN_PAINTING_URL = "https://raw.githubusercontent.com/AzurLaneTools/AzurLaneData/main/EN/ShareCfg/ship_skin_template.json"
-PAINTING_MAP_URL = "https://raw.githubusercontent.com/AzurLaneTools/AzurLaneData/main/EN/ShareCfg/painting_filte_map.json"
 
 @dataclass
 class Skin:
@@ -26,16 +28,32 @@ class Skin:
     tag: List[str] = field(default_factory=list)
     
     def display_name(self):
-        if self.type == "Default":
+        if not self.ship or self.type == "Default":
             return self.name
-        else:
-            return f"{self.ship.name} - {self.name} ({self.type})"
+        if self.type == "Retrofit":
+            return self.name
+        if not self.type:
+            return f"{self.ship.name} - {self.name}"
+        
+        raw = f"{self.ship.name} - {self.name} ({self.type})"
+        # Remove characters not allowed in filenames on Windows/most filesystems
+        forbidden = '<>:"/\\|?*'
+        sanitized = ''.join(c for c in raw if c not in forbidden and ord(c) >= 32)
+        # Trim trailing spaces and dots (not allowed on Windows)
+        sanitized = sanitized.rstrip(' .')
+        return sanitized
     
 @dataclass
 class Ship:
     id: int
     name: str
     skins: List["Skin"] = field(default_factory=list)
+    
+    def default_skin(self) -> Optional[Skin]:
+        for skin in self.skins:
+            if skin.type == "Default":
+                return skin
+        return None
     
 @dataclass
 class ShipCollection:
@@ -46,47 +64,14 @@ class ShipCollection:
     def __post_init__(self):
         self._painting_map = {s.painting: s for s in self.skins}
     
-    def get_skin(self, painting_name: str) -> Optional[Skin]:
-        """Get Skin object by painting asset name (strips variants)."""
-        base_name, _ = strip_variant_suffix(painting_name)
-        return self._painting_map.get(base_name.lower())
-
-    def get_display_name(self, painting_name: str) -> str:
-        """Get formatted display name: 'CharName - SkinName (Type)'."""
-        base_name, variant_suffix = strip_variant_suffix(painting_name)
-        skin = self.get_skin(base_name)
-        if not skin:
-            return painting_name
-        display = skin.display_name()
-        if variant_suffix:
-            display = f"{display} {VARIANT_LABELS.get(variant_suffix, variant_suffix)}"
-        return display
-
-    def get_char_and_skin_name(self, painting_name: str) -> Tuple[str, str]:
-        """Get (char_name, skin_folder_name) for folder structure."""
-        skin = self.get_skin(painting_name)
-        if not skin:
-            return (painting_name, painting_name)
-        return (skin.ship.name, self.get_display_name(painting_name))
-
-    def find_paintings(self, query: str) -> List[str]:
-        """Find all painting names matching a character or skin name."""
-        query = query.lower().strip()
-        matches = set()
-        for ship in self.ships:
-            if query in ship.name.lower():
-                for skin in ship.skins:
-                    matches.add(skin.painting)
-        for skin in self.skins:
-            if query in skin.display_name().lower():
-                matches.add(skin.painting)
-        return sorted(list(matches))
+    def skins_by_painting(self, painting_name: str) -> Optional[Skin]:
+        return self._painting_map.get(painting_name.lower())
 
     def ships_by_name(self, name: str) -> List[Ship]:
         return [ship for ship in self.ships if name.lower() in ship.name.lower()]
     
     def skins_by_name(self, name: str) -> List[Skin]:
-        return [skin for skin in self.skins if name.lower() in skin.display_name().lower()]
+        return [skin for skin in self.skins if name.lower() in skin.name.lower()]
     
     def ship_by_id(self, ship_id: int) -> Optional[Ship]:
         for ship in self.ships:
@@ -99,13 +84,18 @@ class ShipCollection:
             if skin.skin_id == skin_id:
                 return skin
         return None
+    
+    def have_skin(self, painting_name: str) -> bool:
+        """Check if a skin with the given painting name exists."""
+        return painting_name.lower() in self._painting_map
+        
 
 def fetch_name_map() -> ShipCollection:
     """Fetch/load ship and skin data. Returns a ShipCollection."""
     config = get_config()
     
     # Use requests_cache for efficient fetching
-    session = CachedSession(str(NAME_MAP_CACHE.with_suffix('')), cache_control=True)
+    session = CachedSession(CACHE_NAME, cache_control=True)
     
     try:
         log.debug("Fetching ship skin data...")
@@ -129,7 +119,7 @@ def fetch_name_map() -> ShipCollection:
         for s in entry.get("skins"):
             skin_id = s.get("id")
             skin_data = skin_painting.get(str(skin_id))
-            if not skin_data:
+            if (not skin_data) or (ship_id != skin_data.get("ship_group")):
                 continue
                 
             painting = skin_data.get("painting").lower()
@@ -140,6 +130,7 @@ def fetch_name_map() -> ShipCollection:
             else:
                 res_list = [painting]
                 
+            res_list = [r[len("painting/"):] if r.startswith("painting/") else r for r in res_list]
             res_list = [res for res in res_list if "shophx" not in res.lower()]
             
             skin_obj = Skin(

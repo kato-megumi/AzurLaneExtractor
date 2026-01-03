@@ -7,7 +7,9 @@ import UnityPy
 from UnityPy.classes import GameObject
 from UnityPy.enums import ClassIDType
 
-from .constants import strip_variant_suffix
+from azurlane_extractor.name_map import Skin
+
+from .config import get_config
 
 log = logging.getLogger(__name__)
 
@@ -15,49 +17,15 @@ log = logging.getLogger(__name__)
 class AzurlaneAsset:
     """Wrapper for Unity asset bundles."""
     
-    def __init__(self, offset_dir: Path, asset_sub_path: Path):
-        self.directory = offset_dir
-        self.asset_sub_path = asset_sub_path
-        self.bundle = UnityPy.load(str(offset_dir / asset_sub_path))
+    def __init__(self, type: str, skin: Skin, is_censored: bool = False):
+        config = get_config()
+        self.directory = config.asset_dir
+        self.bundle = UnityPy.load(str(config.asset_dir / Path(type) / skin.painting))
         self.container = next(iter(self.bundle.container.values()))
         self._loaded_textures = False
-
-    def loadDependencies(self):
-        """Load texture dependencies for this painting."""
-        if self._loaded_textures:
-            return
-        
-        painting_name = self.asset_sub_path.stem
-        painting_dir = self.directory / self.asset_sub_path.parent
-        base_name, is_variant = strip_variant_suffix(painting_name)[:2]
-        is_variant = bool(is_variant)
-        
-        # Collect texture files
-        texture_files = []
-        for tex_file in painting_dir.iterdir():
-            tex_name = tex_file.stem
-            if not tex_name.endswith("_tex"):
-                continue
-            tex_base = tex_name[:-4]
-            if (tex_base == painting_name or tex_base.startswith(painting_name + "_") or
-                tex_base == base_name or tex_base.startswith(base_name + "_")):
-                texture_files.append(str(tex_file))
-        
-        files_to_load = list(set(texture_files))
-        
-        # For variants, also load the base painting bundle
-        if is_variant:
-            base_painting_file = painting_dir / base_name
-            if base_painting_file.exists():
-                files_to_load.append(str(base_painting_file))
-                log.debug(f"DEP {painting_name}: also loading base painting bundle '{base_name}'")
-        
-        if files_to_load:
-            log.debug(f"DEP {painting_name}: loading {len(texture_files)} texture files" + 
-                  (" + base bundle" if is_variant else ""))
-            self.bundle.load(files_to_load)
-        
-        self._loaded_textures = True
+        if type == "painting":
+            self.bundle.load([str(config.asset_dir/ type / res) for res in skin.res_list])
+                
 
     def getObjectByPathID(self, pathid: int):
         for unity_object in self.bundle.objects:

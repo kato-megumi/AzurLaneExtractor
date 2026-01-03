@@ -5,3 +5,4 @@ test_scripts/
 *.json
 .DS_Store
 output_text/
+*.sqlite
