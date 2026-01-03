@@ -4,7 +4,11 @@ import logging
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, as_completed
+try:
+    from tqdm import tqdm
+except Exception:
+    tqdm = None
 
 from PIL import Image
 from UnityPy.enums import ClassIDType
@@ -174,15 +178,15 @@ def _process_single_painting(skin: Skin, is_censored: bool, asset: AzurlaneAsset
         if is_censored:
             display_name = f"{display_name} (Censored)"
         
-        char_name = skin.ship.name if skin.ship else skin.name
-        skin_name = display_name
+        # output directory uses `config.output_dir` directly
         
         if display_name != painting_name:
             log.debug(f"NAME_MAP {painting_name} -> {display_name}")
 
-        outdir = config.output_dir / char_name / skin_name
+        outdir = config.output_dir # / char_name / skin_name
         outdir.mkdir(parents=True, exist_ok=True)
 
+        print(f" ========== {skin.display_name()} ==========")
         parent_goi, facelayer, canvas_size, offset_adjustment = setup_layers(asset)
 
         face_scale_ids = {}
@@ -221,13 +225,13 @@ def finalize_and_save():
     if config.external_scaler and batch_state.pending:
         scaled_images = flush_batch_scaler()
     
-    for render in _pending_renders:
+    def _process_render(render: PendingRender):
+        """Worker to process and save a single PendingRender. Returns (render.display_name, error_or_none)."""
         try:
             if scaled_images:
                 render.parent_goi.applyScaledImages(scaled_images)
                 
                 # Recalculate canvas size after applying scaled images
-                # because external scaler may have changed image dimensions
                 min_x, min_y, max_x, max_y = render.parent_goi.getBounds()
                 canvas_size = (max(1, int(max_x - min_x)), max(1, int(max_y - min_y)))
                 offset_adjustment = (int(-min_x), int(-min_y))
@@ -248,38 +252,74 @@ def finalize_and_save():
                     if face_type in render.face_scale_ids and render.face_scale_ids[face_type] in scaled_images:
                         scaled_faces[face_type] = scaled_images[render.face_scale_ids[face_type]]
                     elif target_size and faceimg.size != target_size:
-                        scaled_faces[face_type] = faceimg.resize(target_size, Image.LANCZOS)
+                        log.error(f"Face image '{face_type}' size {faceimg.size} does not match target {target_size} for {render.display_name}; skipping resize and using original image.")
+                        scaled_faces[face_type] = faceimg
                     else:
                         scaled_faces[face_type] = faceimg
             
             layer_dir = render.outdir if config.save_layers else None
             
             if render.face_images:
-                rendered = []
-                
-                result = render_image(render.parent_goi, render.facelayer, render.canvas_size, render.offset_adjustment, None, layer_dir)
-                rendered.append((result, render.outdir / f"{render.display_name}_0.png"))
-                
+                # Create frames: base (no face) followed by each face variant
+                frames: list[Image.Image] = []
+
+                base_img = render_image(render.parent_goi, render.facelayer, render.canvas_size, render.offset_adjustment, None, layer_dir)
+                frames.append(base_img.convert('RGBA'))
+
                 for face_type, faceimg in scaled_faces.items():
-                    result = render_image(render.parent_goi, render.facelayer, render.canvas_size, render.offset_adjustment, faceimg, None)
-                    rendered.append((result, render.outdir / f"{render.display_name}_{face_type}.png"))
+                    frame = render_image(render.parent_goi, render.facelayer, render.canvas_size, render.offset_adjustment, faceimg, None)
+                    frames.append(frame.convert('RGBA'))
 
-                def save_image(args):
-                    img, path = args
-                    img.save(path)
-                    return path
+                # Verify all frames share the same size as the canvas.
+                mismatch = False
+                for i, f in enumerate(frames):
+                    if f.size != render.canvas_size:
+                        log.error(f"Frame {i} size {f.size} does not match canvas size {render.canvas_size} for {render.display_name}")
+                        mismatch = True
 
-                with ThreadPoolExecutor(max_workers=os.cpu_count()) as executor:
-                    results = list(executor.map(save_image, rendered))
-                    for outpath in results:
-                        log.debug(f"Saved: {outpath}")
+                outpath = render.outdir / f"{render.display_name}.webp"
+                if mismatch:
+                    # If sizes mismatch, log and skip saving this render entirely
+                    log.error(f"Size mismatch detected - skipping animated WebP for {render.display_name}.")
+                else:
+                    try:
+                        # Save as animated WebP: first frame + appended frames
+                        frames[0].save(
+                            outpath,
+                            format='WEBP',
+                            save_all=True,
+                            append_images=frames[1:],
+                            duration=500,
+                            loop=0,
+                            lossless=True
+                        )
+                        log.debug(f"Saved animated WebP: {outpath}")
+                    except Exception as e:
+                        # On failure, only log the error and skip saving (no PNG fallback)
+                        log.error(f"Failed to save animated WebP {outpath}: {e}. Skipping.")
             else:
                 result = render_image(render.parent_goi, render.facelayer, render.canvas_size, render.offset_adjustment, None, layer_dir)
                 outpath = render.outdir / f"{render.display_name}.png"
                 result.save(outpath)
                 log.debug(f"Saved: {outpath}")
-                    
+
+            return (render.display_name, None)
         except Exception as e:
-            log.error(f"Saving {render.display_name}: {e}")
+            return (render.display_name, e)
+
+    # Run renders in parallel
+    with ThreadPoolExecutor(max_workers=os.cpu_count() or 4) as executor:
+        futures = [executor.submit(_process_render, r) for r in _pending_renders]
+
+        iterable = as_completed(futures)
+        if tqdm:
+            iterable = tqdm(iterable, total=len(futures), desc="Saving renders")
+
+        for future in iterable:
+            name, err = future.result()
+            if err:
+                log.error(f"Saving {name}: {err}")
+            else:
+                log.debug(f"Completed: {name}")
     
     _pending_renders = []

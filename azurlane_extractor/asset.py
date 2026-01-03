@@ -24,7 +24,8 @@ class AzurlaneAsset:
         self.container = next(iter(self.bundle.container.values()))
         self._loaded_textures = False
         if type == "painting":
-            self.bundle.load([str(config.asset_dir/ type / res) for res in skin.res_list])
+            full_res_list = [res for s in skin.ship.skins for res in s.res_list]
+            self.bundle.load([str(config.asset_dir/ type / res) for res in full_res_list])
                 
 
     def getObjectByPathID(self, pathid: int):
