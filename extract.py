@@ -85,6 +85,10 @@ def main(argv=None):
         import logging
         logging.getLogger(__name__).warning("No paintings found for the given inputs.")
         return
+    
+    print("Will extract follwing skins:")
+    for skin in skins:
+        print(f"  - {skin.display_name()}")
 
     # Deduplicate skins by base painting name
     unique_skins = {s.painting: s for s in skins}
@@ -102,10 +106,6 @@ def main(argv=None):
     
     # Finalize and save
     finalize_and_save()
-    
-    import logging
-    logging.getLogger(__name__).info(f"Done. Processed {len(sorted_skins)} base paintings.")
-
 
 if __name__ == "__main__":
     main()

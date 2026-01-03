@@ -20,7 +20,7 @@ class AzurlaneAsset:
     def __init__(self, type: str, skin: Skin, is_censored: bool = False):
         config = get_config()
         self.directory = config.asset_dir
-        self.bundle = UnityPy.load(str(config.asset_dir / Path(type) / skin.painting))
+        self.bundle = UnityPy.load(str(config.asset_dir / Path(type) / (skin.painting + ("_hx" if is_censored else ""))))
         self.container = next(iter(self.bundle.container.values()))
         self._loaded_textures = False
         if type == "painting":
