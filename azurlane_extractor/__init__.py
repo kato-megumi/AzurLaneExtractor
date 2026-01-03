@@ -16,7 +16,7 @@ from .constants import (
 )
 from .asset import AzurlaneAsset
 from .layer import GameObjectLayer, RectTransform
-from .name_map import fetch_name_map, find_paintings_by_char_name, get_display_name, get_char_and_skin_name
+from .name_map import fetch_name_map
 from .extractor import process_painting_group, finalize_and_save, reset_state
 
 __version__ = "1.0.0"
@@ -33,9 +33,6 @@ __all__ = [
     "GameObjectLayer",
     "RectTransform",
     "fetch_name_map",
-    "find_paintings_by_char_name",
-    "get_display_name",
-    "get_char_and_skin_name",
     "process_painting_group",
     "finalize_and_save",
     "reset_state",

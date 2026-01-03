@@ -9,7 +9,6 @@ VARIANT_SUFFIXES = NO_BG_SUFFIXES + OTHER_SUFFIXES  # Combined for stripping
 VARIANT_LABELS = {"_n": "(No BG)", "_hx": "(Censored)", "_n_hx": "(No BG Censored)"}
 
 # Name map caching
-NAME_MAP_URL = "https://raw.githubusercontent.com/AzurLaneTools/AzurLaneData/main/EN/ShareCfg/ship_skin_template.json"
 NAME_MAP_CACHE = Path(__file__).parent.parent / "name_map_cache.json"
 CACHE_MAX_AGE = 86400  # 24 hours
 

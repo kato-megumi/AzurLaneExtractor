@@ -25,9 +25,7 @@ class Config:
     output_dir: Path = field(default_factory=lambda: Path("."))
     extract_no_bg: bool = False  # Extract _n (no background) variants
     save_layers: bool = False  # Save intermediate layers (debug)
-    name_map: dict[str, str] = field(default_factory=dict)
-    reverse_map: dict[str, list[str]] = field(default_factory=dict)
-    base_map: dict[str, str] = field(default_factory=dict)
+    ship_collection: Optional[object] = None
 
 
 # Global config instance

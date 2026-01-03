@@ -13,7 +13,6 @@ from .asset import AzurlaneAsset
 from .layer import GameObjectLayer
 from .config import get_config
 from .constants import strip_variant_suffix
-from .name_map import get_display_name, get_char_and_skin_name
 from .scaler import (
     reset_batch_scaler as _reset_batch_scaler,
     flush_batch_scaler,
@@ -177,8 +176,12 @@ def _process_single_painting(painting_name: str, asset: AzurlaneAsset,
     config = get_config()
     
     try:
-        display_name = get_display_name(painting_name)
-        char_name, skin_name = get_char_and_skin_name(painting_name)
+        if config.ship_collection:
+            display_name = config.ship_collection.get_display_name(painting_name)
+            char_name, skin_name = config.ship_collection.get_char_and_skin_name(painting_name)
+        else:
+            display_name = painting_name
+            char_name, skin_name = painting_name, painting_name
         
         if display_name != painting_name:
             log.debug(f"NAME_MAP {painting_name} -> {display_name}")

@@ -13,7 +13,6 @@ from pathlib import Path
 from azurlane_extractor import (
     setup_logging,
     fetch_name_map,
-    find_paintings_by_char_name,
     find_painting_variants,
     process_painting_group,
     finalize_and_save,
@@ -33,7 +32,7 @@ def main(argv=None):
     """
     parser = ArgumentParser(description="Extract Azur Lane character paintings from Unity assets.")
     parser.add_argument("-c", "--char_name", type=str, required=True,
-        help="Comma-separated list of character names (English). e.g. 'Kotori' finds qinli,qinli_2,etc.")
+        help="Comma-separated list of character names (English).")
     parser.add_argument("-d", "--asset_directory", type=Path, default=Path(r"D:\Azurlane"),
         help="Directory containing all client assets")
     parser.add_argument("-o", "--output", type=Path, default=Path(r"R:\AzurlaneSkinExtract"),
@@ -58,18 +57,22 @@ def main(argv=None):
     config.external_scaler = args.scaler
     config.output_dir = args.output
     
-    if args.refresh_cache and NAME_MAP_CACHE.exists():
-        NAME_MAP_CACHE.unlink()
+    if args.refresh_cache:
+        if NAME_MAP_CACHE.exists():
+            NAME_MAP_CACHE.unlink()
+        sqlite_cache = NAME_MAP_CACHE.with_suffix('.sqlite')
+        if sqlite_cache.exists():
+            sqlite_cache.unlink()
         import logging
         logging.getLogger(__name__).debug("NAME_MAP cache deleted")
     
-    config.name_map, config.reverse_map, config.base_map = fetch_name_map()
+    config.ship_collection = fetch_name_map()
     
     # Resolve char names to painting names
     char_names = [n.strip() for n in args.char_name.split(",") if n.strip()]
     painting_names = []
     for char_name in char_names:
-        found = find_paintings_by_char_name(char_name)
+        found = config.ship_collection.find_paintings(char_name) if config.ship_collection else [char_name]
         import logging
         logging.getLogger(__name__).debug(f"CHAR {char_name} -> {found}")
         painting_names.extend(found)
