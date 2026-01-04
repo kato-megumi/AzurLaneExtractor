@@ -131,22 +131,23 @@ class GameObjectLayer:
                 image = recon(image, self.mesh.export().splitlines())
 
         # Handle size adjustments between recon output and expected raw sprite size
+        # This only applies when mesh reconstruction was done - without mesh,
+        # the texture should be scaled directly to size_delta
         psizex, psizey = image.size
         pdeltax, pdeltay = self.rect_transform.size_delta
         prawx, prawy = parse(meshimage.mRawSpriteSize)
 
-        if prawx != psizex or prawy != psizey:
+        if self.mesh and (prawx != psizex or prawy != psizey):
             # Recon output doesn't match raw sprite size
             if psizex < prawx or psizey < prawy:
                 # Recon output is smaller - paste onto canvas at correct position
                 paste_x, paste_y = 0, 0
-                if self.mesh:
-                    mesh_lines = self.mesh.export().splitlines()
-                    p = list(map(MESH_SR.split, list(filter(MESH_VR.match, mesh_lines))[1::2]))
-                    if p:
-                        vertices = [(-int(float(a[1])), int(float(a[2]))) for a in p]
-                        max_y = max(y for x, y in vertices)
-                        paste_y = int(prawy - max_y)  # Convert from Unity Y-up to screen Y-down
+                mesh_lines = self.mesh.export().splitlines()
+                p = list(map(MESH_SR.split, list(filter(MESH_VR.match, mesh_lines))[1::2]))
+                if p:
+                    vertices = [(-int(float(a[1])), int(float(a[2]))) for a in p]
+                    max_y = max(y for x, y in vertices)
+                    paste_y = int(prawy - max_y)  # Convert from Unity Y-up to screen Y-down
                 
                 empty_canvas = Image.new('RGBA', (int(prawx), int(prawy)), (0, 0, 0, 0))
                 empty_canvas.paste(image, (paste_x, paste_y))
