@@ -1,18 +1,14 @@
 """Main extraction logic for Azur Lane paintings."""
 import os
 import logging
+import numpy as np
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 from concurrent.futures import ThreadPoolExecutor, as_completed
-try:
-    from tqdm import tqdm
-except Exception:
-    tqdm = None
-
+from tqdm import tqdm
 from PIL import Image
 from UnityPy.enums import ClassIDType
-
 from .asset import AzurlaneAsset
 from .layer import GameObjectLayer
 from .config import get_config
@@ -20,7 +16,6 @@ from .name_map import Skin
 from .scaler import (
     reset_batch_scaler as _reset_batch_scaler,
     flush_batch_scaler,
-    queue_face_images_for_scaling,
     get_batch_state,
 )
 
@@ -37,7 +32,7 @@ class PendingRender:
     face_images: dict[str, Image.Image]
     outdir: Path
     display_name: str
-    face_scale_ids: dict[str, str]
+    face_alignment_offset: tuple[int, int] = (0, 0)  # Template-matched offset adjustment for faces
 
 
 # Global state
@@ -83,6 +78,48 @@ def get_face_images(skin: Skin) -> dict[str, Image.Image]:
         return {}
 
 
+def find_best_face_offset(base_img: Image.Image, face_img: Image.Image, 
+                          calc_x: int, calc_y: int, search_radius: int = 3) -> tuple[int, int]:
+    """Find the best face position using template matching.
+    
+    Args:
+        base_img: The base painting image (without face overlay)
+        face_img: The face image to match
+        calc_x, calc_y: Calculated position to search around
+        search_radius: Pixels to search in each direction
+        
+    Returns:
+        (offset_x, offset_y) adjustment to apply to calculated position
+    """
+    
+    base_rgb = np.array(base_img.convert('RGB')).astype(np.float32)
+    face_rgb = np.array(face_img.convert('RGB')).astype(np.float32)
+    face_alpha = np.array(face_img)[:, :, 3].astype(np.float32) / 255.0
+    
+    fh, fw = face_rgb.shape[:2]
+    bh, bw = base_rgb.shape[:2]
+    
+    best_x, best_y = calc_x, calc_y
+    best_mse = float('inf')
+    
+    for y in range(max(0, calc_y - search_radius), min(bh - fh, calc_y + search_radius + 1)):
+        for x in range(max(0, calc_x - search_radius), min(bw - fw, calc_x + search_radius + 1)):
+            region = base_rgb[y:y+fh, x:x+fw]
+            diff = (region - face_rgb) * face_alpha[:, :, np.newaxis]
+            mse = np.mean(diff ** 2)
+            if mse < best_mse:
+                best_mse = mse
+                best_x, best_y = x, y
+    
+    offset_x = best_x - calc_x
+    offset_y = best_y - calc_y
+    
+    if offset_x != 0 or offset_y != 0:
+        log.debug(f"Face alignment adjusted by ({offset_x}, {offset_y}) via template matching (MSE: {best_mse:.0f})")
+    
+    return (offset_x, offset_y)
+
+
 def setup_layers(asset: AzurlaneAsset) -> tuple[GameObjectLayer, Optional[GameObjectLayer], tuple[int, int], tuple[int, int]]:
     """Setup and calculate layer hierarchy. Returns (parent_goi, facelayer, canvas_size, offset_adjustment)."""
     parent_object = asset.getObjectByPathID(asset.container.path_id)
@@ -111,27 +148,46 @@ def setup_layers(asset: AzurlaneAsset) -> tuple[GameObjectLayer, Optional[GameOb
 
 def render_image(parent_goi: GameObjectLayer, facelayer: Optional[GameObjectLayer], 
                  canvas_size: tuple[int, int], offset_adjustment: tuple[int, int],
-                 faceimg: Image.Image = None, layer_output_dir: Optional[Path] = None) -> Image.Image:
+                 faceimg: Image.Image = None, layer_output_dir: Optional[Path] = None,
+                 face_alignment_offset: tuple[int, int] = (0, 0)) -> Image.Image:
     """Render the image with optional face overlay.
     
     Args:
         offset_adjustment: (x, y) to add to all layer offsets to shift into positive space.
             This compensates for layers with negative global offsets.
+        face_alignment_offset: (x, y) template-matched adjustment for face position.
     """
     config = get_config()
     
+    face_offset_adj = (0, 0)
     if faceimg and facelayer:
-        facelayer.loadImageSimple(faceimg)
+        face_offset_adj = facelayer.loadImageSimple(faceimg)
 
     layers_list = list(parent_goi.yieldLayers())
-    log.debug(f"Compositing {len(layers_list)} layers: {[layer.gameobject.m_Name for layer in layers_list]}")
+    
+    # Detailed logging for composite debug
+    log.debug(f"=== Compositing {len(layers_list)} layers, canvas={canvas_size}, adj={offset_adjustment} ===")
 
     canvas = Image.new('RGBA', canvas_size)
     for i, layer in enumerate(layers_list):
         # Apply offset adjustment to shift layers with negative coords into positive space
-        offx = int(layer.global_offset[0] + offset_adjustment[0])
-        offy = int(layer.global_offset[1] + offset_adjustment[1])
-        log.debug(f"  Layer {i}: {layer.gameobject.m_Name} at ({offx}, {offy}), size={layer.image.size}")
+        offx = layer.global_offset[0] + offset_adjustment[0]
+        offy = layer.global_offset[1] + offset_adjustment[1]
+        
+        # Apply face-specific offset adjustments: size mismatch + template-matched alignment
+        if layer is facelayer:
+            if face_offset_adj != (0, 0):
+                offx += face_offset_adj[0]
+                offy += face_offset_adj[1]
+            if face_alignment_offset != (0, 0):
+                offx += face_alignment_offset[0]
+                offy += face_alignment_offset[1]
+        
+        offx, offy = int(offx), int(offy)
+        
+        log.debug(f"  [{i}] {layer.gameobject.m_Name}: img={layer.image.size}, "
+                 f"local={layer.local_offset}, global={layer.global_offset}, pos=({offx},{offy})")
+        
         if (offx < canvas_size[0] and offy < canvas_size[1] and 
             offx + layer.image.width > 0 and offy + layer.image.height > 0):
             canvas.alpha_composite(layer.image, (offx, offy))
@@ -189,12 +245,6 @@ def _process_single_painting(skin: Skin, is_censored: bool, asset: AzurlaneAsset
         print(f" ========== {skin.display_name()} ==========")
         parent_goi, facelayer, canvas_size, offset_adjustment = setup_layers(asset)
 
-        face_scale_ids = {}
-        if face_images and config.external_scaler and facelayer:
-            target_size = (int(facelayer.rect_transform.size_delta[0]),
-                           int(facelayer.rect_transform.size_delta[1]))
-            face_scale_ids = queue_face_images_for_scaling(face_images, target_size)
-
         _pending_renders.append(PendingRender(
             parent_goi=parent_goi,
             facelayer=facelayer,
@@ -203,7 +253,6 @@ def _process_single_painting(skin: Skin, is_censored: bool, asset: AzurlaneAsset
             face_images=face_images,
             outdir=outdir,
             display_name=display_name,
-            face_scale_ids=face_scale_ids
         ))
 
         log.debug(f"QUEUED {painting_name}")
@@ -233,41 +282,55 @@ def finalize_and_save():
                 
                 # Recalculate canvas size after applying scaled images
                 min_x, min_y, max_x, max_y = render.parent_goi.getBounds()
-                canvas_size = (max(1, int(max_x - min_x)), max(1, int(max_y - min_y)))
-                offset_adjustment = (int(-min_x), int(-min_y))
+                render.canvas_size = (max(1, int(max_x - min_x)), max(1, int(max_y - min_y)))
+                render.offset_adjustment = (int(-min_x), int(-min_y))
                 
-                if offset_adjustment != (0, 0):
-                    log.debug(f"Canvas recalculated after scaling: size={canvas_size}, adjustment={offset_adjustment}")
-                
-                render.canvas_size = canvas_size
-                render.offset_adjustment = offset_adjustment
+                if render.offset_adjustment != (0, 0):
+                    log.debug(f"Canvas recalculated after scaling: size={render.canvas_size}, adjustment={render.offset_adjustment}")
             
-            scaled_faces = {}
-            if render.face_images:
-                target_size = None
-                if render.facelayer:
-                    target_size = (int(render.facelayer.rect_transform.size_delta[0]),
-                                   int(render.facelayer.rect_transform.size_delta[1]))
-                for face_type, faceimg in render.face_images.items():
-                    if face_type in render.face_scale_ids and render.face_scale_ids[face_type] in scaled_images:
-                        scaled_faces[face_type] = scaled_images[render.face_scale_ids[face_type]]
-                    elif target_size and faceimg.size != target_size:
-                        log.error(f"Face image '{face_type}' size {faceimg.size} does not match target {target_size} for {render.display_name}; skipping resize and using original image.")
-                        scaled_faces[face_type] = faceimg
-                    else:
-                        scaled_faces[face_type] = faceimg
+            # Get face images (size mismatch is handled by offset adjustment in loadImageSimple)
+            faces = render.face_images
             
             layer_dir = render.outdir if config.save_layers else None
             
-            if render.face_images:
-                # Create frames: base (no face) followed by each face variant
+            if faces:
+                # Create frames: skip base if face '0' exists (it replaces the base)
                 frames: list[Image.Image] = []
+                has_face_zero = '0' in faces
+                
+                # Calculate face alignment offset using template matching on first face
+                face_alignment_offset = (0, 0)
+                if has_face_zero:
+                    # No base image to match against - warn user and use default position
+                    log.warning(f"{render.display_name}: Has face id=0, cannot auto-align faces (no base to match against)")
+                elif render.facelayer:
+                    # Render base image first to use for template matching
+                    base_img = render_image(render.parent_goi, render.facelayer, render.canvas_size, 
+                                           render.offset_adjustment, None, layer_dir)
+                    frames.append(base_img.convert('RGBA'))
+                    
+                    # Use first face for template matching
+                    first_face_id, first_face_img = next(iter(faces.items()))
+                    
+                    # Calculate base position for face
+                    facelayer = render.facelayer
+                    size_adj = facelayer.loadImageSimple(first_face_img)
+                    calc_x = int(facelayer.global_offset[0] + render.offset_adjustment[0] + size_adj[0])
+                    calc_y = int(facelayer.global_offset[1] + render.offset_adjustment[1] + size_adj[1])
+                    
+                    # Find best match position
+                    face_alignment_offset = find_best_face_offset(base_img, first_face_img, calc_x, calc_y)
+                else:
+                    # No numpy or no face layer - render base without template matching
+                    base_img = render_image(render.parent_goi, render.facelayer, render.canvas_size, 
+                                           render.offset_adjustment, None, layer_dir)
+                    frames.append(base_img.convert('RGBA'))
 
-                base_img = render_image(render.parent_goi, render.facelayer, render.canvas_size, render.offset_adjustment, None, layer_dir)
-                frames.append(base_img.convert('RGBA'))
-
-                for face_type, faceimg in scaled_faces.items():
-                    frame = render_image(render.parent_goi, render.facelayer, render.canvas_size, render.offset_adjustment, faceimg, None)
+                for face_type, faceimg in faces.items():
+                    frame = render_image(render.parent_goi, render.facelayer, render.canvas_size, 
+                                        render.offset_adjustment, faceimg, 
+                                        layer_dir if face_type == '0' else None,
+                                        face_alignment_offset)
                     frames.append(frame.convert('RGBA'))
 
                 # Verify all frames share the same size as the canvas.

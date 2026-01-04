@@ -133,12 +133,16 @@ def fetch_name_map() -> ShipCollection:
             res_list = [r[len("painting/"):] if r.startswith("painting/") else r for r in res_list]
             res_list = [res for res in res_list if "shophx" not in res.lower()]
             
+            name = s.get("name")
+            if any(s for s in ship.skins if s.name == name):
+                name += " Alt"
+
             skin_obj = Skin(
                 skin_id=skin_id,
                 painting=painting,
                 res_list=res_list,
                 have_censor=any("_hx" in res.lower() for res in res_list),
-                name=s.get("name"),
+                name=name,
                 type=s.get("type"),
                 ship=ship,
                 tag=(s.get("tag") or []).copy()

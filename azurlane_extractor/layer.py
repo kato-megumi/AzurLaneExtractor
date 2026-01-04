@@ -83,11 +83,17 @@ class GameObjectLayer:
         else:
             self.transform = None
 
-        self.size = (0, 0)
         self.local_offset = (0, 0)
         self.global_offset = (0, 0)
         self.image: Optional[Image.Image] = None
         self._pending_scale_id: Optional[str] = None
+
+        # Initialize size from rect_transform for layers without mesh (e.g., face layer)
+        # This ensures correct offset calculation before image is loaded
+        if hasattr(self, 'rect_transform'):
+            self.size = self.rect_transform.size_delta
+        else:
+            self.size = (0, 0)
 
         self.meshimage = asset.getComponentFromObject(gameobject, types=[ClassIDType.MonoBehaviour], attributes={"mMesh"})
         if self.meshimage:
@@ -149,7 +155,7 @@ class GameObjectLayer:
         # For positioning, always use size_delta (Unity's RectTransform size)
         # But the actual image can be larger (mesh reconstruction can extend beyond bounds)
         before_size = image.size
-        target_size = (int(pdeltax), int(pdeltay))
+        target_size = (round(pdeltax), round(pdeltay))
         
         if config.external_scaler and before_size != target_size and before_size[0] <= target_size[0] and before_size[1] <= target_size[1]:
             # Only queue for external scaling if image needs to be scaled UP
@@ -170,16 +176,34 @@ class GameObjectLayer:
         self.size = (pdeltax, pdeltay)
 
     def loadImageSimple(self, image: Image.Image):
-        """Load a pre-processed image (for face overlays)."""
-        pdeltax, pdeltay = self.rect_transform.size_delta
-        target_size = (int(pdeltax), int(pdeltay))
+        """Load a pre-processed image (for face overlays).
         
-        if image.size == target_size:
-            self.image = image
-        else:
-            self.image = image.resize(target_size, Image.LANCZOS)
-            log.debug(f"SCALE Layer '{self.gameobject.m_Name}': {image.size} -> {target_size} (LANCZOS)")
-        self.size = (pdeltax, pdeltay)
+        Face images may have slightly different dimensions than size_delta.
+        We use the actual image directly. The returned offset adjustment should
+        be applied when compositing, not stored on the layer.
+        
+        Returns:
+            Tuple of (offset_x_adj, offset_y_adj) to be added to global_offset when compositing
+        """
+        pdeltax, pdeltay = self.rect_transform.size_delta
+        target_w, target_h = round(pdeltax), round(pdeltay)
+        img_w, img_h = image.size
+        
+        # Use the actual face image directly
+        self.image = image
+        self.size = (img_w, img_h)
+        
+        # Return offset adjustment to center actual image within where size_delta would be
+        # In PIL coordinates (Y down), if image is SHORTER than target, move UP (subtract Y)
+        # If image is WIDER than target, move LEFT (subtract X)
+        if (img_w, img_h) != (target_w, target_h):
+            dx = (img_w - target_w) / 2
+            dy = (img_h - target_h) / 2
+            log.debug(f"FACE '{self.gameobject.m_Name}': img={image.size} vs target={target_w, target_h}, offset_adj=({-dx:.1f},{dy:.1f})")
+            # X: negative dx for wider image (move left)
+            # Y: positive dy for shorter image (move up, i.e., smaller Y in PIL coords)
+            return (-dx, dy)
+        return (0, 0)
 
     def retrieveChildren(self, recursive: bool = True):
         """Build child layer hierarchy."""
