@@ -36,7 +36,9 @@ def main(argv=None):
         help="Directory containing all client assets")
     parser.add_argument("-o", "--output", type=Path, default=Path(r"R:\AzurlaneSkinExtract"),
         help="Output directory")
-    parser.add_argument("--debug", action="store_true", help="Enable debug output and save intermediate layers")
+    parser.add_argument("--debug", action="store_true", help="Enable debug output and save textures")
+    parser.add_argument("--save-textures", action="store_true", help="Save temporary texture")
+    parser.add_argument("--dry-run", action="store_true", help="Perform a dry run without saving output files")
     parser.add_argument("--scaler", type=str, default=None,
         help="External scaler command with {input} and {output} placeholders")
 
@@ -57,10 +59,11 @@ def main(argv=None):
     # Configure global state
     config = get_config()
     config.debug = args.debug
-    config.save_layers = args.debug  # Always save layers when debug is enabled
+    config.save_textures = args.save_textures or args.debug
     config.external_scaler = args.scaler
     config.asset_dir = args.asset_directory
     config.output_dir = args.output
+    config.dry_run = args.dry_run
     config.ship_collection = fetch_name_map()
     
     # Resolve inputs to Skin objects
@@ -105,7 +108,8 @@ def main(argv=None):
         process_painting_group(skin)
     
     # Finalize and save
-    finalize_and_save()
+    if not config.dry_run:
+        finalize_and_save()
 
 if __name__ == "__main__":
     main()

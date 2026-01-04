@@ -102,6 +102,16 @@ class GameObjectLayer:
     def __repr__(self):
         return f"<{self.__class__.__name__} {self.gameobject.name}>"
 
+    def _save_texture(self, image: Image.Image):
+        """Save unscaled layer image to debug output directory."""
+        config = get_config()
+        if config.save_textures:
+            layer_output_dir = config.output_dir / "_textures"
+            layer_output_dir.mkdir(parents=True, exist_ok=True)
+            layer_path = layer_output_dir / f"{self.texture2d.m_Name}.png"
+            image.save(layer_path)
+            log.debug(f"Saved unscaled layer: {layer_path.name}")
+
     def _loadImage(self, meshimage):
         """Load and reconstruct image from mesh data."""
         from .scaler import add_to_batch_scaler
@@ -157,6 +167,10 @@ class GameObjectLayer:
         # But the actual image can be larger (mesh reconstruction can extend beyond bounds)
         before_size = image.size
         target_size = (round(pdeltax), round(pdeltay))
+        
+        # Save layer before any scaling (if enabled)
+        if config.save_textures:
+            self._save_texture(image)
         
         if config.external_scaler and before_size != target_size and before_size[0] <= target_size[0] and before_size[1] <= target_size[1]:
             # Only queue for external scaling if image needs to be scaled UP

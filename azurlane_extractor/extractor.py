@@ -191,10 +191,6 @@ def render_image(parent_goi: GameObjectLayer, facelayer: Optional[GameObjectLaye
         if (offx < canvas_size[0] and offy < canvas_size[1] and 
             offx + layer.image.width > 0 and offy + layer.image.height > 0):
             canvas.alpha_composite(layer.image, (offx, offy))
-            if layer_output_dir and config.save_layers:
-                layer_path = layer_output_dir / f"_layer_{i:02d}_{layer.gameobject.m_Name}.png"
-                layer.image.save(layer_path)
-                log.debug(f"  Saved layer: {layer_path.name}")
     return canvas
 
 
@@ -291,7 +287,7 @@ def finalize_and_save():
             # Get face images (size mismatch is handled by offset adjustment in loadImageSimple)
             faces = render.face_images
             
-            layer_dir = render.outdir if config.save_layers else None
+            layer_dir = render.outdir if config.save_textures else None
             
             if faces:
                 # Create frames: skip base if face '0' exists (it replaces the base)
