@@ -19,11 +19,13 @@ log = logging.getLogger(__name__)
 @dataclass
 class Skin:
     skin_id: int
-    painting: str # main painting asset
+    painting: str  # main painting asset
     res_list: List[str] = field(default_factory=list)
     name: str = ""
     type: str = ""
     have_censor: bool = False
+    texture_only_censor: bool = False
+    remap: Dict[str, str] = field(default_factory=dict)
     ship: Optional["Ship"] = None
     tag: List[str] = field(default_factory=list)
     
@@ -137,11 +139,22 @@ def fetch_name_map() -> ShipCollection:
             if any(s for s in ship.skins if s.name == name):
                 name += " Alt"
 
+            have_censor = any("_hx" in res.lower() and "_n_hx" not in res.lower() for res in res_list)
+            texture_only_censor = have_censor and (painting + "_hx") not in res_list
+            # Build sprite name remapping for texture-only censoring
+            # Maps uncensored sprite names to their censored _hx equivalents
+            remap = {}
+            for res in res_list:
+                if "_hx" in res.lower() and "_tex" in res.lower():
+                    remap[res.replace("_hx", "").replace("_tex", "")] = res.replace("_tex", "")
+            
             skin_obj = Skin(
                 skin_id=skin_id,
                 painting=painting,
                 res_list=res_list,
-                have_censor=any("_hx" in res.lower() for res in res_list),
+                have_censor=have_censor,
+                texture_only_censor=texture_only_censor,
+                remap=remap,
                 name=name,
                 type=s.get("type"),
                 ship=ship,

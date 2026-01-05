@@ -125,6 +125,14 @@ class GameObjectLayer:
         if not self.sprite:
             return
         
+        # Replace sprite texture with censored version for texture-only censoring
+        # (skins that use _tex assets instead of separate _hx mesh)
+        if self.asset.is_censored and self.asset.skin.texture_only_censor:
+            if self.sprite.m_Name in self.asset.skin.remap:
+                sprite_name = self.asset.skin.remap[self.sprite.m_Name]
+                self.sprite = self.asset.getObjectByName(sprite_name, ClassIDType.Sprite)
+                self.mesh = self.asset.getObjectByName(sprite_name + "-mesh", ClassIDType.Mesh)
+        
         self.texture2d = self.sprite.m_RD.texture.read()
         image = self.texture2d.image
         
@@ -132,7 +140,8 @@ class GameObjectLayer:
               f"texture='{self.texture2d.m_Name}', size={image.size}")
 
         # Reconstruct from mesh if available
-        self.mesh = self.asset.getObjectByPathID(meshimage.mMesh.path_id)
+        if not hasattr(self, 'mesh'):
+            self.mesh = self.asset.getObjectByPathID(meshimage.mMesh.path_id)
         if self.mesh:
             image = recon(image, self.mesh.export().splitlines())
         elif hasattr(meshimage.mMesh, 'read') and meshimage.mMesh.m_PathID != 0:
@@ -214,7 +223,7 @@ class GameObjectLayer:
         if (img_w, img_h) != (target_w, target_h):
             dx = (img_w - target_w) / 2
             dy = (img_h - target_h) / 2
-            log.debug(f"FACE '{self.gameobject.m_Name}': img={image.size} vs target={target_w, target_h}, offset_adj=({-dx:.1f},{dy:.1f})")
+            log.debug(f"FACE '{self.gameobject.m_Name}': img={image.size} vs target=({target_w}, {target_h}), offset_adj=({-dx:.1f}, {dy:.1f})")
             # X: negative dx for wider image (move left)
             # Y: positive dy for shorter image (move up, i.e., smaller Y in PIL coords)
             return (-dx, dy)

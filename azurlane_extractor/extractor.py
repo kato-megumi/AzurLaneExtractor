@@ -48,9 +48,9 @@ def reset_state():
     _face_cache = {}
 
 
-def get_face_images(skin: Skin) -> dict[str, Image.Image]:
+def get_face_images(skin: Skin, is_censored: bool = False) -> dict[str, Image.Image]:
     """Get face images for a painting. Caches by base name."""
-    base_name = skin.painting
+    base_name = skin.painting + ("_hx" if is_censored else "")
     config = get_config()
     
     if base_name in _face_cache:
@@ -64,8 +64,8 @@ def get_face_images(skin: Skin) -> dict[str, Image.Image]:
         return {}
     
     try:
-        fasset = AzurlaneAsset("paintingface", skin)
-        faces = {}
+        fasset: AzurlaneAsset = AzurlaneAsset("paintingface", skin, is_censored)
+        faces: dict[str, Image.Image] = {}
         for unity_object in fasset.bundle.objects:
             if unity_object.type == ClassIDType.Texture2D:
                 tex = unity_object.read()
@@ -133,8 +133,8 @@ def setup_layers(asset: AzurlaneAsset) -> tuple[GameObjectLayer, Optional[GameOb
 
     # Get bounding box to account for negative offsets
     min_x, min_y, max_x, max_y = parent_goi.getBounds()
-    sizex = max(1, int(max_x - min_x))
-    sizey = max(1, int(max_y - min_y))
+    canvas_width = max(1, int(max_x - min_x))
+    canvas_height = max(1, int(max_y - min_y))
     
     # Offset adjustment needed to shift all layers into positive space
     offset_adjustment = (int(-min_x), int(-min_y))
@@ -143,7 +143,7 @@ def setup_layers(asset: AzurlaneAsset) -> tuple[GameObjectLayer, Optional[GameOb
         log.debug(f"Canvas has negative offsets: min=({min_x}, {min_y}), adjustment={offset_adjustment}")
 
     facelayer = parent_goi.findChildLayer('face')
-    return parent_goi, facelayer, (sizex, sizey), offset_adjustment
+    return parent_goi, facelayer, (canvas_width, canvas_height), offset_adjustment
 
 
 def render_image(parent_goi: GameObjectLayer, facelayer: Optional[GameObjectLayer], 
@@ -157,7 +157,6 @@ def render_image(parent_goi: GameObjectLayer, facelayer: Optional[GameObjectLaye
             This compensates for layers with negative global offsets.
         face_alignment_offset: (x, y) template-matched adjustment for face position.
     """
-    config = get_config()
     
     face_offset_adj = (0, 0)
     if faceimg and facelayer:
@@ -212,10 +211,14 @@ def process_painting_group(skin: Skin):
     face_images = get_face_images(skin)
     
     _process_single_painting(skin, False, base_asset, face_images)
-    # todo: more robust censor handling, create censor w/o hx mesh
-    if skin.have_censor and skin.painting + "_hx" in skin.res_list:
-        base_asset_censored = AzurlaneAsset("painting", skin, is_censored=True)
-        _process_single_painting(skin, True, base_asset_censored, face_images)
+    if skin.have_censor:
+        base_asset_censored = AzurlaneAsset("painting", skin, True)
+        censor_face_path = config.asset_dir / "paintingface" / (base_name + "_hx")
+        if censor_face_path.exists():
+            face_images_censor = get_face_images(skin, True)
+        else:
+            face_images_censor = face_images
+        _process_single_painting(skin, True, base_asset_censored, face_images_censor)
 
 
 
@@ -238,7 +241,7 @@ def _process_single_painting(skin: Skin, is_censored: bool, asset: AzurlaneAsset
         outdir = config.output_dir # / char_name / skin_name
         outdir.mkdir(parents=True, exist_ok=True)
 
-        print(f" ========== {skin.display_name()} ==========")
+        print(f" ========== {display_name} ==========")
         parent_goi, facelayer, canvas_size, offset_adjustment = setup_layers(asset)
 
         _pending_renders.append(PendingRender(

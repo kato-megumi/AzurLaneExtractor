@@ -17,15 +17,20 @@ log = logging.getLogger(__name__)
 class AzurlaneAsset:
     """Wrapper for Unity asset bundles."""
     
-    def __init__(self, type: str, skin: Skin, is_censored: bool = False):
+    def __init__(self, asset_type: str, skin: Skin, is_censored: bool = False):
         config = get_config()
         self.directory = config.asset_dir
-        self.bundle = UnityPy.load(str(config.asset_dir / Path(type) / (skin.painting + ("_hx" if is_censored else ""))))
+        suffix = "_hx" if is_censored and ((asset_type == "painting" and not skin.texture_only_censor)
+                          or asset_type == "paintingface") else ""
+        painting_name = skin.painting + suffix
+        self.bundle = UnityPy.load(str(config.asset_dir / Path(asset_type) / painting_name))
         self.container = next(iter(self.bundle.container.values()))
         self._loaded_textures = False
-        if type == "painting":
+        self.is_censored = is_censored
+        self.skin = skin
+        if asset_type == "painting":
             full_res_list = [res for s in skin.ship.skins for res in s.res_list]
-            self.bundle.load([str(config.asset_dir/ type / res) for res in full_res_list])
+            self.bundle.load([str(config.asset_dir/ asset_type / res) for res in full_res_list])
                 
 
     def getObjectByPathID(self, pathid: int):

@@ -6,3 +6,4 @@ test_scripts/
 .DS_Store
 output_text/
 *.sqlite
+.github/copilot-instructions.md

@@ -5,7 +5,6 @@ Azur Lane Painting Extractor - Main Entry Point
 Reconstructs character paintings from Unity assets with support for:
 - Batch scaling with external tools
 - Face overlay compositing  
-- Variant extraction (_hx always, _n with --no-bg flag)
 """
 from argparse import ArgumentParser
 from pathlib import Path
