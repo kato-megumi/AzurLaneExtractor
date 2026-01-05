@@ -1,6 +1,7 @@
 """Main extraction logic for Azur Lane paintings."""
 import os
 import logging
+import UnityPy
 import numpy as np
 from dataclasses import dataclass
 from pathlib import Path
@@ -37,15 +38,13 @@ class PendingRender:
 
 # Global state
 _pending_renders: list[PendingRender] = []
-_face_cache: dict[str, dict[str, Image.Image]] = {}
 
 
 def reset_state():
     """Reset all global state."""
-    global _pending_renders, _face_cache
+    global _pending_renders
     _reset_batch_scaler()
     _pending_renders = []
-    _face_cache = {}
 
 
 def get_face_images(skin: Skin, is_censored: bool = False) -> dict[str, Image.Image]:
@@ -53,28 +52,18 @@ def get_face_images(skin: Skin, is_censored: bool = False) -> dict[str, Image.Im
     base_name = skin.painting + ("_hx" if is_censored else "")
     config = get_config()
     
-    if base_name in _face_cache:
-        return _face_cache[base_name]
-    
-    facebpath = Path("paintingface", base_name)
-    facefile = config.asset_dir / facebpath
-    
-    if not facefile.exists():
-        _face_cache[base_name] = {}
-        return {}
+    facefile = config.asset_dir / "paintingface" / base_name
     
     try:
-        fasset: AzurlaneAsset = AzurlaneAsset("paintingface", skin, is_censored)
+        fasset = UnityPy.load(str(facefile))
         faces: dict[str, Image.Image] = {}
-        for unity_object in fasset.bundle.objects:
+        for unity_object in fasset.objects:
             if unity_object.type == ClassIDType.Texture2D:
                 tex = unity_object.read()
                 faces[tex.m_Name] = tex.image
-        _face_cache[base_name] = faces
         return faces
     except Exception as e:
         log.debug(f"Failed to load face asset '{base_name}': {e}")
-        _face_cache[base_name] = {}
         return {}
 
 
@@ -207,12 +196,12 @@ def process_painting_group(skin: Skin):
         log.debug(f"SKIP {base_name}: asset file not found")
         return
     
-    base_asset = AzurlaneAsset("painting", skin)
+    base_asset = AzurlaneAsset(skin)
     face_images = get_face_images(skin)
     
     _process_single_painting(skin, False, base_asset, face_images)
     if skin.have_censor:
-        base_asset_censored = AzurlaneAsset("painting", skin, True)
+        base_asset_censored = AzurlaneAsset(skin, True)
         censor_face_path = config.asset_dir / "paintingface" / (base_name + "_hx")
         if censor_face_path.exists():
             face_images_censor = get_face_images(skin, True)
@@ -241,7 +230,7 @@ def _process_single_painting(skin: Skin, is_censored: bool, asset: AzurlaneAsset
         outdir = config.output_dir # / char_name / skin_name
         outdir.mkdir(parents=True, exist_ok=True)
 
-        print(f" ========== {display_name} ==========")
+        print(f" >>>>>>>>>> {display_name}")
         parent_goi, facelayer, canvas_size, offset_adjustment = setup_layers(asset)
 
         _pending_renders.append(PendingRender(
@@ -301,7 +290,7 @@ def finalize_and_save():
                 face_alignment_offset = (0, 0)
                 if has_face_zero:
                     # No base image to match against - warn user and use default position
-                    log.warning(f"{render.display_name}: Has face id=0, cannot auto-align faces (no base to match against)")
+                    log.warning(f"{render.display_name}: Has no base face, face position may be misaligned.")
                 elif render.facelayer:
                     # Render base image first to use for template matching
                     base_img = render_image(render.parent_goi, render.facelayer, render.canvas_size, 
