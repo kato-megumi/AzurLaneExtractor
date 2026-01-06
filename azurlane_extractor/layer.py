@@ -94,9 +94,15 @@ class GameObjectLayer:
         else:
             self.size = (0, 0)
 
+        # Try to load image from mesh-based component first
         self.meshimage = asset.getComponentFromObject(gameobject, types=[ClassIDType.MonoBehaviour], attributes={"mMesh"})
         if self.meshimage:
             self._loadImage(self.meshimage)
+        else:
+            # Fallback: try Unity UI Image component
+            self.uiimage = asset.getComponentFromObject(gameobject, types=[ClassIDType.MonoBehaviour], attributes={"m_Sprite"})
+            if self.uiimage:
+                self._loadImageFromUI(self.uiimage)
 
     def __repr__(self):
         return f"<{self.__class__.__name__} {self.gameobject.name}>"
@@ -128,6 +134,50 @@ class GameObjectLayer:
             # Fallback to LANCZOS
             log.debug(f"SCALE Layer '{self.gameobject.m_Name}': {image.size} -> {target_size} (LANCZOS)")
             return image.resize(target_size, Image.LANCZOS)
+
+    def _loadImageFromUI(self, uiimage):
+        """Load image from Unity UI Image component (without mesh)."""
+        config = get_config()
+        
+        # Check if sprite reference is valid (m_PathID != 0)
+        if not uiimage.m_Sprite or uiimage.m_Sprite.m_PathID == 0:
+            return
+        
+        try:
+            self.sprite = uiimage.m_Sprite.read()
+        except FileNotFoundError as e:
+            log.warning(f"Skipping layer '{self.gameobject.m_Name}': sprite not found ({e})")
+            return
+        except Exception as e:
+            log.warning(f"Skipping layer '{self.gameobject.m_Name}': sprite read error ({e})")
+            return
+        
+        if not self.sprite:
+            return
+        
+        self.texture2d = self.sprite.m_RD.texture.read()
+        image = self.texture2d.image
+        
+        log.debug(f"UI LAYER '{self.gameobject.m_Name}': sprite='{self.sprite.m_Name}', "
+                  f"texture='{self.texture2d.m_Name}', size={image.size}")
+        
+        # Save layer before any scaling (if enabled)
+        if config.save_textures:
+            self._save_texture(image)
+        
+        # For UI Image, use rect_transform size_delta as target size
+        if hasattr(self, 'rect_transform'):
+            target_size = (round(self.rect_transform.size_delta[0]), round(self.rect_transform.size_delta[1]))
+            if image.size != target_size and target_size[0] > 0 and target_size[1] > 0:
+                if image.size[0] < target_size[0] or image.size[1] < target_size[1]:
+                    # Need to upscale
+                    image = self._upscale_image(image, target_size)
+                else:
+                    # Just resize down
+                    image = image.resize(target_size, Image.LANCZOS)
+        
+        self.image = image
+        self.size = self.image.size
 
     def _loadImage(self, meshimage):
         """Load and reconstruct image from mesh data."""
