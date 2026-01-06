@@ -3,11 +3,23 @@ import logging
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional, TYPE_CHECKING
+from tqdm import tqdm
 
 if TYPE_CHECKING:
     from .upscaler import ImageUpscaler
 
 log = logging.getLogger(__name__)
+
+
+class TqdmLoggingHandler(logging.StreamHandler):
+    """Logging handler that uses tqdm.write() to avoid breaking progress bars."""
+    
+    def emit(self, record):
+        try:
+            msg = self.format(record)
+            tqdm.write(msg)
+        except Exception:
+            self.handleError(record)
 
 
 def setup_logging(debug: bool = False):
@@ -16,7 +28,7 @@ def setup_logging(debug: bool = False):
     logging.basicConfig(
         level=level,
         format='[%(levelname).1s] %(message)s' if debug else '%(message)s',
-        handlers=[logging.StreamHandler()]
+        handlers=[TqdmLoggingHandler()]
     )
 
 

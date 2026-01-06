@@ -29,7 +29,7 @@ def init_upscaler(model_path: str, tile_type: str = "exact", tile: int = 384,
         cpu_scale=cpu_scale,
         max_concurrent=1
     )
-    log.info(f"Upscaler initialized with model: {model_path}")
+    log.debug(f"Upscaler initialized with model: {model_path}")
 
 
 def get_upscaler() -> Optional[ImageUpscaler]:

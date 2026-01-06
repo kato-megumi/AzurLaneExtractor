@@ -83,6 +83,10 @@ class ImageUpscaler:
                 img_array, tiler=self.tiler, model=self.model, device=self.device, 
                 dtype=self.dtype, scale=self.scale
             )
+            # Cleanup GPU memory after each upscale
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+        gc.collect()
         
         # Convert back to PIL
         upscaled_array = (upscaled_array * 255).clip(0, 255).astype(np.uint8)
