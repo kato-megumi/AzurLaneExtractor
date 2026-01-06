@@ -86,7 +86,6 @@ class GameObjectLayer:
         self.local_offset = (0, 0)
         self.global_offset = (0, 0)
         self.image: Optional[Image.Image] = None
-        self._pending_scale_id: Optional[str] = None
 
         # Initialize size from rect_transform for layers without mesh (e.g., face layer)
         # This ensures correct offset calculation before image is loaded
@@ -112,9 +111,26 @@ class GameObjectLayer:
             image.save(layer_path)
             log.debug(f"Saved unscaled layer: {layer_path.name}")
 
+    def _upscale_image(self, image: Image.Image, target_size: tuple[int, int]) -> Image.Image:
+        """Upscale an image using the global upscaler if available, otherwise use LANCZOS."""
+        from .extractor import get_upscaler
+        
+        upscaler = get_upscaler()
+        if upscaler:
+            # Use AI upscaler
+            upscaled = upscaler.upscale(image)
+            # Resize to exact target size if needed
+            if upscaled.size != target_size:
+                upscaled = upscaled.resize(target_size, Image.LANCZOS)
+            log.debug(f"AI SCALE '{self.gameobject.m_Name}': {image.size} -> {upscaled.size}")
+            return upscaled
+        else:
+            # Fallback to LANCZOS
+            log.debug(f"SCALE Layer '{self.gameobject.m_Name}': {image.size} -> {target_size} (LANCZOS)")
+            return image.resize(target_size, Image.LANCZOS)
+
     def _loadImage(self, meshimage):
         """Load and reconstruct image from mesh data."""
-        from .scaler import add_to_batch_scaler
         config = get_config()
         
         try:
@@ -181,15 +197,10 @@ class GameObjectLayer:
         if config.save_textures:
             self._save_texture(image)
         
-        if config.external_scaler and before_size != target_size and before_size[0] <= target_size[0] and before_size[1] <= target_size[1]:
-            # Only queue for external scaling if image needs to be scaled UP
-            # Never scale down mesh-reconstructed images
-            self._pending_scale_id = add_to_batch_scaler(image, target_size, self.gameobject.m_Name)
-            self.image = image
-        elif before_size != target_size and before_size[0] <= target_size[0] and before_size[1] <= target_size[1]:
+        if before_size != target_size and before_size[0] <= target_size[0] and before_size[1] <= target_size[1]:
             # Only scale UP to match size_delta, never scale DOWN
-            self.image = image.resize(target_size, Image.LANCZOS)
-            log.debug(f"SCALE Layer '{self.gameobject.m_Name}': {before_size} -> {target_size} (LANCZOS)")
+            # Uses AI upscaler if available, otherwise LANCZOS
+            self.image = self._upscale_image(image, target_size)
         else:
             # Image is same size or larger - keep as-is
             self.image = image
@@ -520,10 +531,3 @@ class GameObjectLayer:
         for child in sorted_children:
             yield from child.yieldLayers()
 
-    def applyScaledImages(self, scaled_images: dict[str, Image.Image]):
-        """Apply scaled images from batch results."""
-        if self._pending_scale_id and self._pending_scale_id in scaled_images:
-            self.image = scaled_images[self._pending_scale_id]
-            self._pending_scale_id = None
-        for child in self.children:
-            child.applyScaledImages(scaled_images)

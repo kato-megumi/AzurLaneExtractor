@@ -3,19 +3,19 @@
 Azur Lane Painting Extractor - Main Entry Point
 
 Reconstructs character paintings from Unity assets with support for:
-- Batch scaling with external tools
+- AI upscaling with external models
 - Face overlay compositing  
 """
+import os
 from argparse import ArgumentParser
 from pathlib import Path
 
 from azurlane_extractor import (
     setup_logging,
     fetch_name_map,
-    process_painting_group,
-    finalize_and_save,
-    reset_state,
+    process_paintings_concurrent,
     get_config,
+    init_upscaler,
 )
 
 
@@ -38,8 +38,22 @@ def main(argv=None):
     parser.add_argument("--debug", action="store_true", help="Enable debug output and save textures")
     parser.add_argument("--save-textures", action="store_true", help="Save temporary texture")
     parser.add_argument("--dry-run", action="store_true", help="Perform a dry run without saving output files")
-    parser.add_argument("--scaler", type=str, default=None,
-        help="External scaler command with {input} and {output} placeholders")
+    parser.add_argument("-j", "--jobs", type=int, default=os.cpu_count() or 4,
+        help="Number of concurrent jobs (default: CPU count)")
+    
+    # Upscaler options
+    parser.add_argument("-m", "--upscaler-model", type=str, default=None,
+        help="Path to AI upscaler model file")
+    parser.add_argument("--upscaler-tile", type=int, default=384,
+        help="Tile size for upscaler (default: 384)")
+    parser.add_argument("--upscaler-tile-type", type=str, default="exact",
+        choices=["exact", "max", "no_tiling"],
+        help="Tiling mode for upscaler (default: exact)")
+    parser.add_argument("--upscaler-dtype", type=str, default="BF16",
+        choices=["F16", "BF16", "F32"],
+        help="Data type for upscaler (default: BF16)")
+    parser.add_argument("--upscaler-cpu", action="store_true",
+        help="Use CPU instead of CUDA for upscaling")
 
     # Ensure at least one of -c/--char_name or -p/--painting_name is provided.
     _orig_parse_args = parser.parse_args
@@ -59,11 +73,20 @@ def main(argv=None):
     config = get_config()
     config.debug = args.debug
     config.save_textures = args.save_textures or args.debug
-    config.external_scaler = args.scaler
     config.asset_dir = args.asset_directory
     config.output_dir = args.output
     config.dry_run = args.dry_run
     config.ship_collection = fetch_name_map()
+    
+    # Initialize upscaler if model path provided
+    if args.upscaler_model:
+        init_upscaler(
+            model_path=args.upscaler_model,
+            tile_type=args.upscaler_tile_type,
+            tile=args.upscaler_tile,
+            dtype=args.upscaler_dtype,
+            cpu_scale=args.upscaler_cpu
+        )
     
     # Resolve inputs to Skin objects
     skins = []
@@ -87,10 +110,6 @@ def main(argv=None):
         import logging
         logging.getLogger(__name__).warning("No paintings found for the given inputs.")
         return
-    
-    # print("Will extract follwing skins:")
-    # for skin in skins:
-    #     print(f"  - {skin.display_name()}")
 
     # Deduplicate skins by base painting name
     unique_skins = {s.painting: s for s in skins}
@@ -98,17 +117,10 @@ def main(argv=None):
     
     import logging
     logging.getLogger(__name__).debug(f"Found {len(sorted_skins)} base paintings to process.")
+    
+    # Process paintings concurrently
+    process_paintings_concurrent(sorted_skins, max_workers=args.jobs)
 
-    # Reset state
-    reset_state()
-    
-    # Process each painting group
-    for skin in sorted_skins:
-        process_painting_group(skin)
-    
-    # Finalize and save
-    if not config.dry_run:
-        finalize_and_save()
 
 if __name__ == "__main__":
     main()

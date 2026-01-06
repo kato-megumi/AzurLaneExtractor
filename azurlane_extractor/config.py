@@ -2,7 +2,10 @@
 import logging
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional
+from typing import Optional, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from .upscaler import ImageUpscaler
 
 log = logging.getLogger(__name__)
 
@@ -21,12 +24,12 @@ def setup_logging(debug: bool = False):
 class Config:
     """Global configuration."""
     debug: bool = False
-    external_scaler: Optional[str] = None
     asset_dir: Path = field(default_factory=lambda: Path("."))
     output_dir: Path = field(default_factory=lambda: Path("."))
     save_textures: bool = False  # Save temporary texture layers
     ship_collection: Optional[object] = None
     dry_run: bool = False  # If True, do not save output files
+    upscaler: Optional["ImageUpscaler"] = None  # AI upscaler instance
 
 
 # Global config instance

@@ -1,50 +1,59 @@
 """Main extraction logic for Azur Lane paintings."""
-import os
 import logging
 import UnityPy
 import numpy as np
-from dataclasses import dataclass
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Optional
-from concurrent.futures import ThreadPoolExecutor, as_completed
-from tqdm import tqdm
 from PIL import Image
 from UnityPy.enums import ClassIDType
+from tqdm import tqdm
 from .asset import AzurlaneAsset
 from .layer import GameObjectLayer
 from .config import get_config
 from .name_map import Skin
-from .scaler import (
-    reset_batch_scaler as _reset_batch_scaler,
-    flush_batch_scaler,
-    get_batch_state,
-)
+from .upscaler import ImageUpscaler
 
 log = logging.getLogger(__name__)
 
 
-@dataclass 
-class PendingRender:
-    """A painting queued for rendering after batch scaling."""
-    parent_goi: GameObjectLayer
-    facelayer: Optional[GameObjectLayer]
-    canvas_size: tuple[int, int]
-    offset_adjustment: tuple[int, int]
-    face_images: dict[str, Image.Image]
-    outdir: Path
-    display_name: str
-    face_alignment_offset: tuple[int, int] = (0, 0)  # Template-matched offset adjustment for faces
+def init_upscaler(model_path: str, tile_type: str = "exact", tile: int = 384,
+                  dtype: str = "BF16", cpu_scale: bool = False):
+    """Initialize the upscaler in config."""
+    config = get_config()
+    config.upscaler = ImageUpscaler(
+        model_path=model_path,
+        tile_type=tile_type,
+        tile=tile,
+        dtype=dtype,
+        cpu_scale=cpu_scale,
+        max_concurrent=1
+    )
+    log.info(f"Upscaler initialized with model: {model_path}")
 
 
-# Global state
-_pending_renders: list[PendingRender] = []
+def get_upscaler() -> Optional[ImageUpscaler]:
+    """Get the upscaler instance from config."""
+    return get_config().upscaler
 
 
-def reset_state():
-    """Reset all global state."""
-    global _pending_renders
-    _reset_batch_scaler()
-    _pending_renders = []
+def process_paintings_concurrent(skins: list[Skin], max_workers: int = 4):
+    """Process multiple paintings concurrently with progress bar."""
+    if not skins:
+        return
+    
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = {executor.submit(process_painting_group, skin): skin for skin in skins}
+        
+        with tqdm(total=len(futures), desc="Processing paintings", unit="painting") as pbar:
+            for future in as_completed(futures):
+                skin = futures[future]
+                try:
+                    future.result()
+                    pbar.update(1)
+                except Exception as e:
+                    log.error(f"Error processing {skin.painting}: {e}")
+                    pbar.update(1)
 
 
 def get_face_images(skin: Skin, is_censored: bool = False) -> dict[str, Image.Image]:
@@ -184,8 +193,6 @@ def render_image(parent_goi: GameObjectLayer, facelayer: Optional[GameObjectLaye
 
 def process_painting_group(skin: Skin):
     """Process a painting and all its variants, reusing the base asset."""
-    # default_skin = skin.ship.default_skin() 
-    # base_name = default_skin.painting if default_skin else skin.painting
     base_name = skin.painting
     config = get_config()
 
@@ -210,10 +217,9 @@ def process_painting_group(skin: Skin):
         _process_single_painting(skin, True, base_asset_censored, face_images_censor)
 
 
-
 def _process_single_painting(skin: Skin, is_censored: bool, asset: AzurlaneAsset, 
                              face_images: dict[str, Image.Image]):
-    """Process a single painting variant."""
+    """Process a single painting variant and save immediately."""
     painting_name = skin.painting + ("_hx" if is_censored else "")
     config = get_config()
     
@@ -222,155 +228,85 @@ def _process_single_painting(skin: Skin, is_censored: bool, asset: AzurlaneAsset
         if is_censored:
             display_name = f"{display_name} (Censored)"
         
-        # output directory uses `config.output_dir` directly
-        
         if display_name != painting_name:
             log.debug(f"NAME_MAP {painting_name} -> {display_name}")
 
-        outdir = config.output_dir # / char_name / skin_name
+        outdir = config.output_dir
         outdir.mkdir(parents=True, exist_ok=True)
 
-        print(f" >>>>>>>>>> {display_name}")
+        # print(f" >>>>>>>>>> {display_name}")
         parent_goi, facelayer, canvas_size, offset_adjustment = setup_layers(asset)
+        
+        layer_dir = outdir if config.save_textures else None
+        
+        if face_images:
+            # Create frames: skip base if face '0' exists (it replaces the base)
+            frames: list[Image.Image] = []
+            has_face_zero = '0' in face_images
+            
+            # Calculate face alignment offset using template matching on first face
+            face_alignment_offset = (0, 0)
+            if has_face_zero:
+                # No base image to match against - warn user and use default position
+                log.warning(f"{display_name}: Has no base face, face position may be misaligned.")
+            elif facelayer:
+                # Render base image first to use for template matching
+                base_img = render_image(parent_goi, facelayer, canvas_size, 
+                                       offset_adjustment, None, layer_dir)
+                frames.append(base_img.convert('RGBA'))
+                
+                # Use first face for template matching
+                first_face_id, first_face_img = next(iter(face_images.items()))
+                
+                # Calculate base position for face
+                size_adj = facelayer.loadImageSimple(first_face_img)
+                calc_x = int(facelayer.global_offset[0] + offset_adjustment[0] + size_adj[0])
+                calc_y = int(facelayer.global_offset[1] + offset_adjustment[1] + size_adj[1])
+                
+                # Find best match position
+                face_alignment_offset = find_best_face_offset(base_img, first_face_img, calc_x, calc_y)
+            else:
+                # No face layer - render base without template matching
+                base_img = render_image(parent_goi, facelayer, canvas_size, 
+                                       offset_adjustment, None, layer_dir)
+                frames.append(base_img.convert('RGBA'))
 
-        _pending_renders.append(PendingRender(
-            parent_goi=parent_goi,
-            facelayer=facelayer,
-            canvas_size=canvas_size,
-            offset_adjustment=offset_adjustment,
-            face_images=face_images,
-            outdir=outdir,
-            display_name=display_name,
-        ))
+            for face_type, faceimg in face_images.items():
+                frame = render_image(parent_goi, facelayer, canvas_size, 
+                                    offset_adjustment, faceimg, 
+                                    layer_dir if face_type == '0' else None,
+                                    face_alignment_offset)
+                frames.append(frame.convert('RGBA'))
 
-        log.debug(f"QUEUED {painting_name}")
+            # Verify all frames share the same size as the canvas
+            mismatch = False
+            for i, f in enumerate(frames):
+                if f.size != canvas_size:
+                    log.error(f"Frame {i} size {f.size} does not match canvas size {canvas_size} for {display_name}")
+                    mismatch = True
+
+            outpath = outdir / f"{display_name}.webp"
+            if mismatch:
+                log.error(f"Size mismatch detected - skipping animated WebP for {display_name}.")
+            else:
+                # Save as animated WebP: first frame + appended frames
+                frames[0].save(
+                    outpath,
+                    format='WEBP',
+                    save_all=True,
+                    append_images=frames[1:],
+                    duration=500,
+                    loop=0,
+                    lossless=True
+                )
+                log.debug(f"Saved animated WebP: {outpath}")
+        else:
+            result = render_image(parent_goi, facelayer, canvas_size, offset_adjustment, None, layer_dir)
+            outpath = outdir / f"{display_name}.png"
+            result.save(outpath)
+            log.debug(f"Saved: {outpath}")
+
+        log.debug(f"DONE {painting_name}")
 
     except Exception as e:
         log.error(f"{painting_name}: {e}")
-
-
-def finalize_and_save():
-    """Flush batch scaler, apply scaled images, and save all renders."""
-    global _pending_renders
-    config = get_config()
-    
-    if not _pending_renders:
-        return
-    
-    scaled_images = {}
-    batch_state = get_batch_state()
-    if config.external_scaler and batch_state.pending:
-        scaled_images = flush_batch_scaler()
-    
-    def _process_render(render: PendingRender):
-        """Worker to process and save a single PendingRender. Returns (render.display_name, error_or_none)."""
-        try:
-            if scaled_images:
-                render.parent_goi.applyScaledImages(scaled_images)
-                
-                # Recalculate canvas size after applying scaled images
-                min_x, min_y, max_x, max_y = render.parent_goi.getBounds()
-                render.canvas_size = (max(1, int(max_x - min_x)), max(1, int(max_y - min_y)))
-                render.offset_adjustment = (int(-min_x), int(-min_y))
-                
-                if render.offset_adjustment != (0, 0):
-                    log.debug(f"Canvas recalculated after scaling: size={render.canvas_size}, adjustment={render.offset_adjustment}")
-            
-            # Get face images (size mismatch is handled by offset adjustment in loadImageSimple)
-            faces = render.face_images
-            
-            layer_dir = render.outdir if config.save_textures else None
-            
-            if faces:
-                # Create frames: skip base if face '0' exists (it replaces the base)
-                frames: list[Image.Image] = []
-                has_face_zero = '0' in faces
-                
-                # Calculate face alignment offset using template matching on first face
-                face_alignment_offset = (0, 0)
-                if has_face_zero:
-                    # No base image to match against - warn user and use default position
-                    log.warning(f"{render.display_name}: Has no base face, face position may be misaligned.")
-                elif render.facelayer:
-                    # Render base image first to use for template matching
-                    base_img = render_image(render.parent_goi, render.facelayer, render.canvas_size, 
-                                           render.offset_adjustment, None, layer_dir)
-                    frames.append(base_img.convert('RGBA'))
-                    
-                    # Use first face for template matching
-                    first_face_id, first_face_img = next(iter(faces.items()))
-                    
-                    # Calculate base position for face
-                    facelayer = render.facelayer
-                    size_adj = facelayer.loadImageSimple(first_face_img)
-                    calc_x = int(facelayer.global_offset[0] + render.offset_adjustment[0] + size_adj[0])
-                    calc_y = int(facelayer.global_offset[1] + render.offset_adjustment[1] + size_adj[1])
-                    
-                    # Find best match position
-                    face_alignment_offset = find_best_face_offset(base_img, first_face_img, calc_x, calc_y)
-                else:
-                    # No numpy or no face layer - render base without template matching
-                    base_img = render_image(render.parent_goi, render.facelayer, render.canvas_size, 
-                                           render.offset_adjustment, None, layer_dir)
-                    frames.append(base_img.convert('RGBA'))
-
-                for face_type, faceimg in faces.items():
-                    frame = render_image(render.parent_goi, render.facelayer, render.canvas_size, 
-                                        render.offset_adjustment, faceimg, 
-                                        layer_dir if face_type == '0' else None,
-                                        face_alignment_offset)
-                    frames.append(frame.convert('RGBA'))
-
-                # Verify all frames share the same size as the canvas.
-                mismatch = False
-                for i, f in enumerate(frames):
-                    if f.size != render.canvas_size:
-                        log.error(f"Frame {i} size {f.size} does not match canvas size {render.canvas_size} for {render.display_name}")
-                        mismatch = True
-
-                outpath = render.outdir / f"{render.display_name}.webp"
-                if mismatch:
-                    # If sizes mismatch, log and skip saving this render entirely
-                    log.error(f"Size mismatch detected - skipping animated WebP for {render.display_name}.")
-                else:
-                    try:
-                        # Save as animated WebP: first frame + appended frames
-                        frames[0].save(
-                            outpath,
-                            format='WEBP',
-                            save_all=True,
-                            append_images=frames[1:],
-                            duration=500,
-                            loop=0,
-                            lossless=True
-                        )
-                        log.debug(f"Saved animated WebP: {outpath}")
-                    except Exception as e:
-                        # On failure, only log the error and skip saving (no PNG fallback)
-                        log.error(f"Failed to save animated WebP {outpath}: {e}. Skipping.")
-            else:
-                result = render_image(render.parent_goi, render.facelayer, render.canvas_size, render.offset_adjustment, None, layer_dir)
-                outpath = render.outdir / f"{render.display_name}.png"
-                result.save(outpath)
-                log.debug(f"Saved: {outpath}")
-
-            return (render.display_name, None)
-        except Exception as e:
-            return (render.display_name, e)
-
-    # Run renders in parallel
-    with ThreadPoolExecutor(max_workers=os.cpu_count() or 4) as executor:
-        futures = [executor.submit(_process_render, r) for r in _pending_renders]
-
-        iterable = as_completed(futures)
-        if tqdm:
-            iterable = tqdm(iterable, total=len(futures), desc="Saving renders")
-
-        for future in iterable:
-            name, err = future.result()
-            if err:
-                log.error(f"Saving {name}: {err}")
-            else:
-                log.debug(f"Completed: {name}")
-    
-    _pending_renders = []
