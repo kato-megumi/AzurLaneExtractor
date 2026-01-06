@@ -306,48 +306,6 @@ class GameObjectLayer:
             for child in self.children:
                 child.calculateLocalOffset(recursive)
 
-    def getSmallestOffset(self, parent_accumulated: tuple[float, float] = None) -> tuple[float, float]:
-        """Get minimum accumulated offset across this layer and children to ensure all content fits on canvas.
-        
-        Args:
-            parent_accumulated: Accumulated offset from parent layers
-        """
-        if parent_accumulated is None:
-            parent_accumulated = (0.0, 0.0)
-        
-        # My accumulated offset
-        my_accumulated = (
-            parent_accumulated[0] + self.local_offset[0],
-            parent_accumulated[1] + self.local_offset[1]
-        )
-        
-        min_offx, min_offy = (float('inf'), float('inf'))
-        
-        if self.image:
-            min_offx, min_offy = my_accumulated
-            
-        for child in self.children:
-            offcx, offcy = child.getSmallestOffset(my_accumulated)
-            if offcx != float('inf'):
-                min_offx = min(min_offx, offcx)
-            if offcy != float('inf'):
-                min_offy = min(min_offy, offcy)
-        
-        # Fall back to (0, 0) only if no offsets found at all (root level)
-        if parent_accumulated == (0.0, 0.0):
-            if min_offx == float('inf'):
-                min_offx = 0
-            if min_offy == float('inf'):
-                min_offy = 0
-        return min_offx, min_offy
-    
-    def _hasImageChildren(self) -> bool:
-        """Check if any descendants have images."""
-        for child in self.children:
-            if child.image or child._hasImageChildren():
-                return True
-        return False
-
     def calculateGlobalOffset(self, base_offset: tuple[float, float] = None, 
                                parent_accumulated: tuple[float, float] = None,
                                root_size: tuple[float, float] = None):
@@ -490,14 +448,6 @@ class GameObjectLayer:
             max_y = max(max_y, c_max_y)
         
         return min_x, min_y, max_x, max_y
-    
-    def getBiggestSize(self) -> tuple[float, float]:
-        """Get canvas size needed to fit this layer and all children.
-        
-        Returns (width, height) accounting for negative offsets.
-        """
-        min_x, min_y, max_x, max_y = self.getBounds()
-        return max_x - min_x, max_y - min_y
 
     def printHierarchy(self, indent: int = 0):
         """Debug: print the layer hierarchy."""

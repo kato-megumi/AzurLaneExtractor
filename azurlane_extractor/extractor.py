@@ -146,7 +146,7 @@ def setup_layers(asset: AzurlaneAsset) -> tuple[GameObjectLayer, Optional[GameOb
 
 def render_image(parent_goi: GameObjectLayer, facelayer: Optional[GameObjectLayer], 
                  canvas_size: tuple[int, int], offset_adjustment: tuple[int, int],
-                 faceimg: Image.Image = None, layer_output_dir: Optional[Path] = None,
+                 faceimg: Image.Image = None,
                  face_alignment_offset: tuple[int, int] = (0, 0)) -> Image.Image:
     """Render the image with optional face overlay.
     
@@ -237,8 +237,6 @@ def _process_single_painting(skin: Skin, is_censored: bool, asset: AzurlaneAsset
         # print(f" >>>>>>>>>> {display_name}")
         parent_goi, facelayer, canvas_size, offset_adjustment = setup_layers(asset)
         
-        layer_dir = outdir if config.save_textures else None
-        
         if face_images:
             # Create frames: skip base if face '0' exists (it replaces the base)
             frames: list[Image.Image] = []
@@ -252,7 +250,7 @@ def _process_single_painting(skin: Skin, is_censored: bool, asset: AzurlaneAsset
             elif facelayer:
                 # Render base image first to use for template matching
                 base_img = render_image(parent_goi, facelayer, canvas_size, 
-                                       offset_adjustment, None, layer_dir)
+                                       offset_adjustment, None)
                 frames.append(base_img.convert('RGBA'))
                 
                 # Use first face for template matching
@@ -268,13 +266,12 @@ def _process_single_painting(skin: Skin, is_censored: bool, asset: AzurlaneAsset
             else:
                 # No face layer - render base without template matching
                 base_img = render_image(parent_goi, facelayer, canvas_size, 
-                                       offset_adjustment, None, layer_dir)
+                                       offset_adjustment, None)
                 frames.append(base_img.convert('RGBA'))
 
             for face_type, faceimg in face_images.items():
                 frame = render_image(parent_goi, facelayer, canvas_size, 
                                     offset_adjustment, faceimg, 
-                                    layer_dir if face_type == '0' else None,
                                     face_alignment_offset)
                 frames.append(frame.convert('RGBA'))
 
@@ -301,7 +298,7 @@ def _process_single_painting(skin: Skin, is_censored: bool, asset: AzurlaneAsset
                 )
                 log.debug(f"Saved animated WebP: {outpath}")
         else:
-            result = render_image(parent_goi, facelayer, canvas_size, offset_adjustment, None, layer_dir)
+            result = render_image(parent_goi, facelayer, canvas_size, offset_adjustment, None)
             outpath = outdir / f"{display_name}.png"
             result.save(outpath)
             log.debug(f"Saved: {outpath}")

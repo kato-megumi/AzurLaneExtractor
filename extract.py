@@ -37,7 +37,6 @@ def main(argv=None):
         help="Output directory")
     parser.add_argument("--debug", action="store_true", help="Enable debug output and save textures")
     parser.add_argument("--save-textures", action="store_true", help="Save temporary texture")
-    parser.add_argument("--dry-run", action="store_true", help="Perform a dry run without saving output files")
     parser.add_argument("-j", "--jobs", type=int, default=os.cpu_count() or 4,
         help="Number of concurrent jobs (default: CPU count)")
     
@@ -75,7 +74,6 @@ def main(argv=None):
     config.save_textures = args.save_textures or args.debug
     config.asset_dir = args.asset_directory
     config.output_dir = args.output
-    config.dry_run = args.dry_run
     config.ship_collection = fetch_name_map()
     
     # Initialize upscaler if model path provided

@@ -28,7 +28,6 @@ class Config:
     output_dir: Path = field(default_factory=lambda: Path("."))
     save_textures: bool = False  # Save temporary texture layers
     ship_collection: Optional[object] = None
-    dry_run: bool = False  # If True, do not save output files
     upscaler: Optional["ImageUpscaler"] = None  # AI upscaler instance
 
 
