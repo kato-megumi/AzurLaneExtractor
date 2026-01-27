@@ -85,6 +85,103 @@ def _compute_face_mse(base_rgb: np.ndarray, face_rgb: np.ndarray,
     return np.mean(diff ** 2)
 
 
+def _find_edge_mask(face_alpha: np.ndarray) -> np.ndarray:
+    """Find edge pixels: non-transparent pixels at the edge of the rectangular image."""
+    fh, fw = face_alpha.shape
+    
+    edge_mask = np.zeros_like(face_alpha, dtype=bool)
+    
+    # Top and bottom rows
+    edge_mask[0, :] = face_alpha[0, :] > 0.01
+    edge_mask[fh-1, :] = face_alpha[fh-1, :] > 0.01
+    
+    # Left and right columns
+    edge_mask[:, 0] = face_alpha[:, 0] > 0.01
+    edge_mask[:, fw-1] = face_alpha[:, fw-1] > 0.01
+    
+    return edge_mask
+
+
+def _compute_edge_coherence(base_rgb: np.ndarray, face_rgb: np.ndarray,
+                            face_alpha: np.ndarray, edge_mask: np.ndarray,
+                            x: int, y: int) -> float:
+    """Compute edge coherence score - how well face edges blend with base.
+    
+    Compares the face edge pixels with what's underneath in the base image.
+    For good placement, the colors should match smoothly. Lower = better.
+    """
+    fh, fw = face_rgb.shape[:2]
+    region = base_rgb[y:y+fh, x:x+fw]
+    
+    if not np.any(edge_mask):
+        return float('inf')
+    
+    # Compare face edge colors with base colors at those positions
+    diff = np.abs(region[edge_mask] - face_rgb[edge_mask])
+    
+    return np.mean(diff ** 2)
+
+
+def _search_region_coherence(base_rgb: np.ndarray, face_rgb: np.ndarray, face_alpha: np.ndarray,
+                             edge_mask: np.ndarray,
+                             x_range: range, y_range: range, step: int = 1) -> tuple[int, int, float]:
+    """Search for best coherence (edge blending). Returns (best_x, best_y, best_score)."""
+    fh, fw = face_rgb.shape[:2]
+    bh, bw = base_rgb.shape[:2]
+    
+    best_x, best_y = x_range.start, y_range.start
+    best_score = float('inf')
+    
+    for y in range(y_range.start, y_range.stop, step):
+        if y < 0 or y + fh > bh:
+            continue
+        for x in range(x_range.start, x_range.stop, step):
+            if x < 0 or x + fw > bw:
+                continue
+            score = _compute_edge_coherence(base_rgb, face_rgb, face_alpha, edge_mask, x, y)
+            if score < best_score:
+                best_score = score
+                best_x, best_y = x, y
+    
+    return best_x, best_y, best_score
+
+
+def find_coherent_face_offset(base_img: Image.Image, face_img: Image.Image,
+                              calc_x: int, calc_y: int,
+                              search_radius: int = 10) -> tuple[tuple[int, int], float]:
+    """Find best face position based on edge coherence (for no-base-face cases).
+    
+    Args:
+        base_img: The base painting image
+        face_img: The face image to place
+        calc_x, calc_y: Calculated position to search around
+        search_radius: Pixels to search in each direction
+        
+    Returns:
+        ((offset_x, offset_y), coherence_score)
+    """
+    base_rgb = np.array(base_img.convert('RGB')).astype(np.float32)
+    face_rgb = np.array(face_img.convert('RGB')).astype(np.float32)
+    face_alpha = np.array(face_img)[:, :, 3].astype(np.float32) / 255.0
+    
+    fh, fw = face_rgb.shape[:2]
+    bh, bw = base_rgb.shape[:2]
+    
+    # Find edge mask once (pixels at the boundary of the face)
+    edge_mask = _find_edge_mask(face_alpha)
+    
+    # Search around calculated position
+    x_range = range(max(0, calc_x - search_radius), min(bw - fw + 1, calc_x + search_radius + 1))
+    y_range = range(max(0, calc_y - search_radius), min(bh - fh + 1, calc_y + search_radius + 1))
+    
+    best_x, best_y, best_score = _search_region_coherence(base_rgb, face_rgb, face_alpha, edge_mask, x_range, y_range)
+    
+    if best_score == float('inf'):
+        return ((0, 0), best_score)
+    else:
+        return ((best_x - calc_x, best_y - calc_y), best_score)
+
+
 def _search_region(base_rgb: np.ndarray, face_rgb: np.ndarray, face_alpha: np.ndarray,
                    x_range: range, y_range: range, step: int = 1) -> tuple[int, int, float]:
     """Search a region for best face match. Returns (best_x, best_y, best_mse)."""
@@ -323,12 +420,18 @@ def _process_single_painting(skin: Skin, is_censored: bool, asset: AzurlaneAsset
                         base_img, match_face_img, calc_x, calc_y, mse_threshold=float('inf'))
                     
                     # Check if base has a face by matching face '0' against base
-                    # Bad match (high MSE) → base has no face → skip base, discard offset
+                    # Bad match (high MSE) → base has no face → use coherence search
                     # Complete match (very low MSE) → face '0' == base → skip base  
                     # Good but non-complete match → base has different face → include base
-                    if mse > 2000:  # Bad match - no base face
-                        log.warning(f"{display_name}: No base face detected (MSE={mse:.0f})")
-                        face_alignment_offset = (0, 0)  # Discard offset
+                    if mse > 2000:  # Bad match - no base face, use coherence search
+                        coherence_offset, coherence_score = find_coherent_face_offset(
+                            base_img, match_face_img, calc_x, calc_y)
+                        if coherence_score != float('inf'):
+                            face_alignment_offset = coherence_offset
+                            log.warning(f"{display_name}: No base face detected, using coherence offset={coherence_offset} (score={coherence_score:.0f})")
+                        else:
+                            face_alignment_offset = (0, 0)
+                            log.warning(f"{display_name}: No base face detected (MSE={mse:.0f}), but coherence search failed, using no offset")
                     elif mse < 10:  # Complete match - face '0' is same as base
                         log.debug(f"{display_name}: Face '0' matches base (MSE={mse:.0f}), skipping base frame")
                     else:  # Good match but not identical - base has a different face
