@@ -76,8 +76,42 @@ def get_face_images(skin: Skin, is_censored: bool = False) -> dict[str, Image.Im
         return {}
 
 
+def _compute_face_mse(base_rgb: np.ndarray, face_rgb: np.ndarray, 
+                      face_alpha: np.ndarray, x: int, y: int) -> float:
+    """Compute MSE between face and base region at given position."""
+    fh, fw = face_rgb.shape[:2]
+    region = base_rgb[y:y+fh, x:x+fw]
+    diff = (region - face_rgb) * face_alpha[:, :, np.newaxis]
+    return np.mean(diff ** 2)
+
+
+def _search_region(base_rgb: np.ndarray, face_rgb: np.ndarray, face_alpha: np.ndarray,
+                   x_range: range, y_range: range, step: int = 1) -> tuple[int, int, float]:
+    """Search a region for best face match. Returns (best_x, best_y, best_mse)."""
+    fh, fw = face_rgb.shape[:2]
+    bh, bw = base_rgb.shape[:2]
+    
+    best_x, best_y = x_range.start, y_range.start
+    best_mse = float('inf')
+    
+    for y in range(y_range.start, y_range.stop, step):
+        if y < 0 or y + fh > bh:
+            continue
+        for x in range(x_range.start, x_range.stop, step):
+            if x < 0 or x + fw > bw:
+                continue
+            mse = _compute_face_mse(base_rgb, face_rgb, face_alpha, x, y)
+            if mse < best_mse:
+                best_mse = mse
+                best_x, best_y = x, y
+    
+    return best_x, best_y, best_mse
+
+
 def find_best_face_offset(base_img: Image.Image, face_img: Image.Image, 
-                          calc_x: int, calc_y: int, search_radius: int = 3) -> tuple[int, int]:
+                          calc_x: int, calc_y: int,
+                          search_radius: int = 3,
+                          mse_threshold: float = 2000.0) -> tuple[tuple[int, int], float, bool]:
     """Find the best face position using template matching.
     
     Args:
@@ -85,9 +119,10 @@ def find_best_face_offset(base_img: Image.Image, face_img: Image.Image,
         face_img: The face image to match
         calc_x, calc_y: Calculated position to search around
         search_radius: Pixels to search in each direction
+        mse_threshold: If MSE exceeds this, expand search to whole image
         
     Returns:
-        (offset_x, offset_y) adjustment to apply to calculated position
+        ((offset_x, offset_y), final_mse, expanded_search) - offset adjustment, MSE value, whether expanded search was used
     """
     
     base_rgb = np.array(base_img.convert('RGB')).astype(np.float32)
@@ -97,25 +132,51 @@ def find_best_face_offset(base_img: Image.Image, face_img: Image.Image,
     fh, fw = face_rgb.shape[:2]
     bh, bw = base_rgb.shape[:2]
     
-    best_x, best_y = calc_x, calc_y
-    best_mse = float('inf')
+    # Phase 1: Local search around calculated position
+    x_range = range(max(0, calc_x - search_radius), min(bw - fw + 1, calc_x + search_radius + 1))
+    y_range = range(max(0, calc_y - search_radius), min(bh - fh + 1, calc_y + search_radius + 1))
     
-    for y in range(max(0, calc_y - search_radius), min(bh - fh, calc_y + search_radius + 1)):
-        for x in range(max(0, calc_x - search_radius), min(bw - fw, calc_x + search_radius + 1)):
-            region = base_rgb[y:y+fh, x:x+fw]
-            diff = (region - face_rgb) * face_alpha[:, :, np.newaxis]
-            mse = np.mean(diff ** 2)
-            if mse < best_mse:
-                best_mse = mse
-                best_x, best_y = x, y
+    best_x, best_y, best_mse = _search_region(base_rgb, face_rgb, face_alpha, x_range, y_range)
+    expanded = False
+    
+    # Check if match is good enough
+    if best_mse > mse_threshold:
+        expanded = True
+        
+        # Phase 2: Coarse search over entire image (step=16)
+        coarse_step = 16
+        x_range_full = range(0, bw - fw + 1)
+        y_range_full = range(0, bh - fh + 1)
+        
+        coarse_x, coarse_y, coarse_mse = _search_region(
+            base_rgb, face_rgb, face_alpha, x_range_full, y_range_full, step=coarse_step
+        )
+        
+        # Phase 3: Medium search around coarse result (step=4)
+        medium_radius = coarse_step
+        x_range_med = range(max(0, coarse_x - medium_radius), min(bw - fw + 1, coarse_x + medium_radius + 1))
+        y_range_med = range(max(0, coarse_y - medium_radius), min(bh - fh + 1, coarse_y + medium_radius + 1))
+        
+        med_x, med_y, med_mse = _search_region(
+            base_rgb, face_rgb, face_alpha, x_range_med, y_range_med, step=4
+        )
+        
+        # Phase 4: Fine search around medium result (step=1)
+        fine_radius = 4
+        x_range_fine = range(max(0, med_x - fine_radius), min(bw - fw + 1, med_x + fine_radius + 1))
+        y_range_fine = range(max(0, med_y - fine_radius), min(bh - fh + 1, med_y + fine_radius + 1))
+        
+        fine_x, fine_y, fine_mse = _search_region(
+            base_rgb, face_rgb, face_alpha, x_range_fine, y_range_fine, step=1
+        )
+        
+        if fine_mse < best_mse:
+            best_x, best_y, best_mse = fine_x, fine_y, fine_mse
     
     offset_x = best_x - calc_x
     offset_y = best_y - calc_y
     
-    if offset_x != 0 or offset_y != 0:
-        log.debug(f"Face alignment adjusted by ({offset_x}, {offset_y}) via template matching (MSE: {best_mse:.0f})")
-    
-    return (offset_x, offset_y)
+    return ((offset_x, offset_y), best_mse, expanded)
 
 
 def setup_layers(asset: AzurlaneAsset) -> tuple[GameObjectLayer, Optional[GameObjectLayer], tuple[int, int], tuple[int, int]]:
@@ -238,31 +299,49 @@ def _process_single_painting(skin: Skin, is_censored: bool, asset: AzurlaneAsset
         parent_goi, facelayer, canvas_size, offset_adjustment = setup_layers(asset)
         
         if face_images:
-            # Create frames: skip base if face '0' exists (it replaces the base)
             frames: list[Image.Image] = []
             has_face_zero = '0' in face_images
             
-            # Calculate face alignment offset using template matching on first face
+            # Calculate face alignment offset using template matching
             face_alignment_offset = (0, 0)
-            if has_face_zero:
-                # No base image to match against - warn user and use default position
-                log.warning(f"{display_name}: Has no base face, face position may be misaligned.")
-            elif facelayer:
-                # Render base image first to use for template matching
+            if facelayer:
+                # Always render base image without face for template matching
                 base_img = render_image(parent_goi, facelayer, canvas_size, 
                                        offset_adjustment, None)
-                frames.append(base_img.convert('RGBA'))
                 
-                # Use first face for template matching
-                first_face_id, first_face_img = next(iter(face_images.items()))
+                # Use face '0' if available, otherwise first face
+                match_face_img = face_images.get('0') or next(iter(face_images.values()))
                 
                 # Calculate base position for face
-                size_adj = facelayer.loadImageSimple(first_face_img)
+                size_adj = facelayer.loadImageSimple(match_face_img)
                 calc_x = int(facelayer.global_offset[0] + offset_adjustment[0] + size_adj[0])
                 calc_y = int(facelayer.global_offset[1] + offset_adjustment[1] + size_adj[1])
                 
-                # Find best match position
-                face_alignment_offset = find_best_face_offset(base_img, first_face_img, calc_x, calc_y)
+                if has_face_zero:
+                    # Only do local search - don't expand for face '0' case
+                    face_alignment_offset, mse, expanded = find_best_face_offset(
+                        base_img, match_face_img, calc_x, calc_y, mse_threshold=float('inf'))
+                    
+                    # Check if base has a face by matching face '0' against base
+                    # Bad match (high MSE) → base has no face → skip base, discard offset
+                    # Complete match (very low MSE) → face '0' == base → skip base  
+                    # Good but non-complete match → base has different face → include base
+                    if mse > 2000:  # Bad match - no base face
+                        log.warning(f"{display_name}: No base face detected (MSE={mse:.0f})")
+                        face_alignment_offset = (0, 0)  # Discard offset
+                    elif mse < 10:  # Complete match - face '0' is same as base
+                        log.debug(f"{display_name}: Face '0' matches base (MSE={mse:.0f}), skipping base frame")
+                    else:  # Good match but not identical - base has a different face
+                        log.debug(f"{display_name}: Base has different face than '0' (MSE={mse:.0f}), including base frame")
+                        frames.append(base_img.convert('RGBA'))
+                else:
+                    # No face '0' - base definitely has a face baked in
+                    frames.append(base_img.convert('RGBA'))
+                    face_alignment_offset, mse, expanded = find_best_face_offset(base_img, match_face_img, calc_x, calc_y)
+                    if expanded:
+                        log.warning(f"{display_name}: Face position misaligned, used expanded search (MSE={mse:.0f}), offset={face_alignment_offset}")
+                    elif face_alignment_offset != (0, 0):
+                        log.debug(f"{display_name}: Face alignment adjusted by {face_alignment_offset} (MSE={mse:.0f})")
             else:
                 # No face layer - render base without template matching
                 base_img = render_image(parent_goi, facelayer, canvas_size, 
