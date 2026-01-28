@@ -12,3 +12,11 @@ CACHE_NAME = "AzurlaneCache"
 MESH_VR = re.compile(r'v ')
 MESH_TR = re.compile(r'vt ')
 MESH_SR = re.compile(r' ')
+
+# Hardcoded manual layer position overrides
+# Format: "layer_name": (x, y)
+# These are applied automatically and can be overridden by --layer-pos command line argument
+LAYER_POSITION_OVERRIDES: dict[str, tuple[int, int]] = {
+    "aotuo_3_rw": (862,370),
+    "xiefeierde_4_front": (2437, 394),  # Found via coherence matching
+}

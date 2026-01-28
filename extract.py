@@ -31,6 +31,8 @@ def main(argv=None):
         help="Comma-separated list of character names (English).")
     parser.add_argument("-p", "--painting_name", type=str, default="",
         help="Comma-separated list of specific painting names to extract.")
+    parser.add_argument("-t", "--type", type=str, default="",
+        help="Comma-separated list of skin types to extract (e.g., 'Maid', 'Wedding', 'Retrofit').")
     parser.add_argument("-d", "--asset_directory", type=Path, default=Path(r"D:\Azurlane"),
         help="Directory containing all client assets")
     parser.add_argument("-o", "--output", type=Path, default=Path(r"R:\AzurlaneSkinExtract"),
@@ -53,13 +55,17 @@ def main(argv=None):
         help="Data type for upscaler (default: BF16)")
     parser.add_argument("--upscaler-cpu", action="store_true",
         help="Use CPU instead of CUDA for upscaling")
+    
+    # Layer position overrides
+    parser.add_argument("--layer-pos", type=str, action="append",
+        help="Override layer position: layer_name=x,y (e.g., aotuo_3_rw=861,501). Can be used multiple times.")
 
     # Ensure at least one of -c/--char_name or -p/--painting_name is provided.
     _orig_parse_args = parser.parse_args
     def _parse_args_and_validate(argv=None):
         args = _orig_parse_args(argv)
-        if not args.char_name and not args.painting_name:
-            parser.error("Either -c/--char_name or -p/--painting_name is required.")
+        if not args.char_name and not args.painting_name and not args.type:
+            parser.error("Either -c/--char_name, -p/--painting_name, or -t/--type is required.")
         return args
     parser.parse_args = _parse_args_and_validate
     
@@ -75,6 +81,16 @@ def main(argv=None):
     config.asset_dir = args.asset_directory
     config.output_dir = args.output
     config.ship_collection = fetch_name_map()
+    
+    # Parse layer position overrides
+    if args.layer_pos:
+        for override in args.layer_pos:
+            try:
+                layer_name, pos = override.split('=')
+                x, y = pos.split(',')
+                config.layer_position_overrides[layer_name.strip()] = (int(x), int(y))
+            except ValueError:
+                parser.error(f"Invalid --layer-pos format: {override}. Expected format: layer_name=x,y")
     
     # Initialize upscaler if model path provided
     if args.upscaler_model:
@@ -102,6 +118,13 @@ def main(argv=None):
             if config.ship_collection:
                 skin = config.ship_collection.skins_by_painting(p_name)
                 if skin:
+                    skins.append(skin)
+
+    if args.type:
+        skin_types = [t.strip().lower() for t in args.type.split(",") if t.strip()]
+        if config.ship_collection:
+            for skin in config.ship_collection.skins:
+                if skin.type and skin.type.lower() in skin_types:
                     skins.append(skin)
 
     if not skins:

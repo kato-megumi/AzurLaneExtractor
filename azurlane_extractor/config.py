@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional, TYPE_CHECKING
 from tqdm import tqdm
+from .constants import LAYER_POSITION_OVERRIDES
 
 if TYPE_CHECKING:
     from .upscaler import ImageUpscaler
@@ -41,6 +42,9 @@ class Config:
     save_textures: bool = False  # Save temporary texture layers
     ship_collection: Optional[object] = None
     upscaler: Optional["ImageUpscaler"] = None  # AI upscaler instance
+    layer_position_overrides: dict[str, tuple[int, int]] = field(
+        default_factory=lambda: dict(LAYER_POSITION_OVERRIDES)
+    )  # Manual position overrides (starts with hardcoded defaults, can be extended via CLI)
 
 
 # Global config instance

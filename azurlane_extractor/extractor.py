@@ -273,6 +273,9 @@ def find_best_face_offset(base_img: Image.Image, face_img: Image.Image,
     offset_x = best_x - calc_x
     offset_y = best_y - calc_y
     
+    if abs(offset_x) <= search_radius and abs(offset_y) <= search_radius:
+        expanded = False
+    
     return ((offset_x, offset_y), best_mse, expanded)
 
 
@@ -314,9 +317,8 @@ def render_image(parent_goi: GameObjectLayer, facelayer: Optional[GameObjectLaye
         face_alignment_offset: (x, y) template-matched adjustment for face position.
     """
     
-    face_offset_adj = (0, 0)
     if faceimg and facelayer:
-        face_offset_adj = facelayer.loadImageSimple(faceimg)
+        facelayer.loadImageSimple(faceimg)
 
     layers_list = list(parent_goi.yieldLayers())
     
@@ -325,15 +327,22 @@ def render_image(parent_goi: GameObjectLayer, facelayer: Optional[GameObjectLaye
 
     canvas = Image.new('RGBA', canvas_size)
     for i, layer in enumerate(layers_list):
-        # Apply offset adjustment to shift layers with negative coords into positive space
-        offx = layer.global_offset[0] + offset_adjustment[0]
-        offy = layer.global_offset[1] + offset_adjustment[1]
+        # Check for manual position override
+        from .config import get_config
+        config = get_config()
+        layer_name = layer.gameobject.m_Name
         
-        # Apply face-specific offset adjustments: size mismatch + template-matched alignment
+        if layer_name in config.layer_position_overrides:
+            # Use manual override (absolute position, no adjustments)
+            offx, offy = config.layer_position_overrides[layer_name]
+            log.debug(f"  Using MANUAL position override for '{layer_name}': ({offx}, {offy})")
+        else:
+            # Apply offset adjustment to shift layers with negative coords into positive space
+            offx = layer.global_offset[0] + offset_adjustment[0]
+            offy = layer.global_offset[1] + offset_adjustment[1]
+        
+        # Apply face-specific offset adjustments: template-matched alignment
         if layer is facelayer:
-            if face_offset_adj != (0, 0):
-                offx += face_offset_adj[0]
-                offy += face_offset_adj[1]
             if face_alignment_offset != (0, 0):
                 offx += face_alignment_offset[0]
                 offy += face_alignment_offset[1]
@@ -398,6 +407,9 @@ def _process_single_painting(skin: Skin, is_censored: bool, asset: AzurlaneAsset
         if face_images:
             frames: list[Image.Image] = []
             has_face_zero = '0' in face_images
+            # if has_face_zero:
+            #     log.warning(f"{skin.painting}: Face '0' detected")
+            # return
             
             # Calculate face alignment offset using template matching
             face_alignment_offset = (0, 0)
@@ -410,14 +422,15 @@ def _process_single_painting(skin: Skin, is_censored: bool, asset: AzurlaneAsset
                 match_face_img = face_images.get('0') or next(iter(face_images.values()))
                 
                 # Calculate base position for face
-                size_adj = facelayer.loadImageSimple(match_face_img)
-                calc_x = int(facelayer.global_offset[0] + offset_adjustment[0] + size_adj[0])
-                calc_y = int(facelayer.global_offset[1] + offset_adjustment[1] + size_adj[1])
+                facelayer.loadImageSimple(match_face_img)
+                match_face_img = facelayer.image  # Reload face image with correct size
+                calc_x = int(facelayer.global_offset[0] + offset_adjustment[0])
+                calc_y = int(facelayer.global_offset[1] + offset_adjustment[1])
                 
                 if has_face_zero:
-                    # Only do local search - don't expand for face '0' case
+                    # mse_threshold=float('inf') means don't expand for face '0' case
                     face_alignment_offset, mse, expanded = find_best_face_offset(
-                        base_img, match_face_img, calc_x, calc_y, mse_threshold=float('inf'))
+                        base_img, match_face_img, calc_x, calc_y)
                     
                     # Check if base has a face by matching face '0' against base
                     # Bad match (high MSE) → base has no face → use coherence search

@@ -1,6 +1,7 @@
 """Name mapping functionality for character/skin names."""
 import logging
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import List, Optional, Tuple, Dict
 
 from requests_cache import CachedSession
@@ -97,7 +98,10 @@ def fetch_name_map() -> ShipCollection:
     config = get_config()
     
     # Use requests_cache for efficient fetching
-    session = CachedSession(CACHE_NAME, cache_control=True)
+    # Store cache in project folder (parent of this module's directory)
+    project_dir = Path(__file__).parent.parent
+    cache_path = project_dir / CACHE_NAME
+    session = CachedSession(str(cache_path), cache_control=True)
     
     try:
         log.debug("Fetching ship skin data...")
@@ -133,7 +137,7 @@ def fetch_name_map() -> ShipCollection:
                 res_list = [painting]
                 
             res_list = [r[len("painting/"):] if r.startswith("painting/") else r for r in res_list]
-            res_list = [res for res in res_list if "shophx" not in res.lower()]
+            res_list = [res for res in res_list if "shophx" not in res.lower() and "shadow" not in res.lower()]
             
             name = s.get("name")
             if any(s for s in ship.skins if s.name == name):

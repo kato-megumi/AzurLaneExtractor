@@ -146,10 +146,10 @@ class GameObjectLayer:
         try:
             self.sprite = uiimage.m_Sprite.read()
         except FileNotFoundError as e:
-            log.warning(f"Skipping layer '{self.gameobject.m_Name}': sprite not found ({e})")
+            log.warning(f"  -Skipping layer '{self.gameobject.m_Name}': sprite not found ({e})")
             return
         except Exception as e:
-            log.warning(f"Skipping layer '{self.gameobject.m_Name}': sprite read error ({e})")
+            log.warning(f"  -Skipping layer '{self.gameobject.m_Name}': sprite read error ({e})")
             return
         
         if not self.sprite:
@@ -186,7 +186,7 @@ class GameObjectLayer:
         try:
             self.sprite = meshimage.m_Sprite.read()
         except FileNotFoundError as e:
-            log.warning(f"Skipping layer '{self.gameobject.m_Name}': sprite not found ({e})")
+            log.warning(f"  =Skipping layer '{self.gameobject.m_Name}': sprite not found ({e})")
             return
         if not self.sprite:
             return
@@ -263,32 +263,19 @@ class GameObjectLayer:
     def loadImageSimple(self, image: Image.Image):
         """Load a pre-processed image (for face overlays).
         
-        Face images may have slightly different dimensions than size_delta.
-        We use the actual image directly. The returned offset adjustment should
-        be applied when compositing, not stored on the layer.
-        
-        Returns:
-            Tuple of (offset_x_adj, offset_y_adj) to be added to global_offset when compositing
+        Face images are scaled to match size_delta exactly.
         """
         pdeltax, pdeltay = self.rect_transform.size_delta
         target_w, target_h = round(pdeltax), round(pdeltay)
-        img_w, img_h = image.size
         
-        # Use the actual face image directly
+        # Scale face to match target size exactly
+        if (abs(image.size[0] - target_w) / max(target_w, 1) > 0.05 or
+            abs(image.size[1] - target_h) / max(target_h, 1) > 0.05):
+            log.warning(f"Face size mismatch for {self.asset.skin.display_name()} : {self.asset.skin.painting}, size {image.size} target face size {(target_w,target_h)} ")
+            image = image.resize((target_w, target_h), Image.LANCZOS)
+        
         self.image = image
-        self.size = (img_w, img_h)
-        
-        # Return offset adjustment to center actual image within where size_delta would be
-        # In PIL coordinates (Y down), if image is SHORTER than target, move UP (subtract Y)
-        # If image is WIDER than target, move LEFT (subtract X)
-        if (img_w, img_h) != (target_w, target_h):
-            dx = (img_w - target_w) / 2
-            dy = (img_h - target_h) / 2
-            log.debug(f"FACE '{self.gameobject.m_Name}': img={image.size} vs target=({target_w}, {target_h}), offset_adj=({-dx:.1f}, {dy:.1f})")
-            # X: negative dx for wider image (move left)
-            # Y: positive dy for shorter image (move up, i.e., smaller Y in PIL coords)
-            return (-dx, dy)
-        return (0, 0)
+        self.size = (target_w, target_h)
 
     def retrieveChildren(self, recursive: bool = True):
         """Build child layer hierarchy."""
@@ -328,11 +315,6 @@ class GameObjectLayer:
 
             # Special fix for aotuo_3 face layer positioning issue (including variants like aotuo_3_hx)
             adjusted_anchorpos_y = anchorpos[1]
-            if (self.gameobject.m_Name == 'face' and self.parent and 
-                self.parent.gameobject.m_Name.startswith('aotuo_3')):
-                # aotuo_3 has incorrect face anchored_position.y in Unity data
-                # Correct value should be -190 instead of -60
-                adjusted_anchorpos_y = -190.0
 
             if anchor_min == anchor_max:
                 # Point anchor - element positioned relative to anchor point
