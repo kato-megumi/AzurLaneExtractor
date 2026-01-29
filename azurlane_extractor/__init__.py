@@ -11,7 +11,7 @@ from .constants import (
 )
 from .asset import AzurlaneAsset
 from .layer import GameObjectLayer, RectTransform
-from .name_map import fetch_name_map, Skin, Ship
+from .name_map import fetch_name_map
 from .extractor import process_painting_group, process_paintings_concurrent, init_upscaler, get_upscaler
 from .upscaler import ImageUpscaler
 

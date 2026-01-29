@@ -67,6 +67,7 @@ class ImageUpscaler:
         """
         # Handle transparency
         has_alpha = img.mode in ("RGBA", "LA") or (img.mode == "P" and "transparency" in img.info)
+        alpha = None
         if has_alpha:
             rgba = img.convert("RGBA")
             r, g, b, alpha = rgba.split()
@@ -93,8 +94,8 @@ class ImageUpscaler:
         upscaled_rgb = Image.fromarray(upscaled_array)
         
         # Reattach alpha if needed
-        if has_alpha:
-            alpha_up = alpha.resize(upscaled_rgb.size, resample=Image.LANCZOS)
+        if has_alpha and alpha is not None:
+            alpha_up = alpha.resize(upscaled_rgb.size, resample=Image.Resampling.LANCZOS)
             r, g, b = upscaled_rgb.split()
             return Image.merge("RGBA", (r, g, b, alpha_up))
         
@@ -121,7 +122,7 @@ if __name__ == "__main__":
     img = Image.open(input_path)
     print(f"Original size: {img.size}, mode: {img.mode}")
     
-    print(f"\nUpscaling...")
+    print("\nUpscaling...")
     upscaled_img = upscaler.upscale(img)
     
     print(f"Upscaled size: {upscaled_img.size}, mode: {upscaled_img.mode}")

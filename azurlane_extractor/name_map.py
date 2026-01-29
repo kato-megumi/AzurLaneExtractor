@@ -2,7 +2,7 @@
 import logging
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import List, Optional, Tuple, Dict
+from typing import List, Optional, Dict
 
 from requests_cache import CachedSession
 

@@ -62,11 +62,11 @@ def main(argv=None):
 
     # Ensure at least one of -c/--char_name or -p/--painting_name is provided.
     _orig_parse_args = parser.parse_args
-    def _parse_args_and_validate(argv=None):
-        args = _orig_parse_args(argv)
-        if not args.char_name and not args.painting_name and not args.type:
+    def _parse_args_and_validate(args=None, namespace=None):
+        parsed_args = _orig_parse_args(args, namespace)
+        if not parsed_args.char_name and not parsed_args.painting_name and not parsed_args.type:
             parser.error("Either -c/--char_name, -p/--painting_name, or -t/--type is required.")
-        return args
+        return parsed_args
     parser.parse_args = _parse_args_and_validate
     
     args = parser.parse_args(argv)

@@ -82,7 +82,7 @@ def _compute_face_mse(base_rgb: np.ndarray, face_rgb: np.ndarray,
     fh, fw = face_rgb.shape[:2]
     region = base_rgb[y:y+fh, x:x+fw]
     diff = (region - face_rgb) * face_alpha[:, :, np.newaxis]
-    return np.mean(diff ** 2)
+    return float(np.mean(diff ** 2))
 
 
 def _find_edge_mask(face_alpha: np.ndarray) -> np.ndarray:
@@ -119,7 +119,7 @@ def _compute_edge_coherence(base_rgb: np.ndarray, face_rgb: np.ndarray,
     # Compare face edge colors with base colors at those positions
     diff = np.abs(region[edge_mask] - face_rgb[edge_mask])
     
-    return np.mean(diff ** 2)
+    return float(np.mean(diff ** 2))
 
 
 def _search_region_coherence(base_rgb: np.ndarray, face_rgb: np.ndarray, face_alpha: np.ndarray,
@@ -307,7 +307,7 @@ def setup_layers(asset: AzurlaneAsset) -> tuple[GameObjectLayer, Optional[GameOb
 
 def render_image(parent_goi: GameObjectLayer, facelayer: Optional[GameObjectLayer], 
                  canvas_size: tuple[int, int], offset_adjustment: tuple[int, int],
-                 faceimg: Image.Image = None,
+                 faceimg: Optional[Image.Image] = None,
                  face_alignment_offset: tuple[int, int] = (0, 0)) -> Image.Image:
     """Render the image with optional face overlay.
     
@@ -349,10 +349,10 @@ def render_image(parent_goi: GameObjectLayer, facelayer: Optional[GameObjectLaye
         
         offx, offy = int(offx), int(offy)
         
-        log.debug(f"  [{i}] {layer.gameobject.m_Name}: img={layer.image.size}, "
+        log.debug(f"  [{i}] {layer.gameobject.m_Name}: img={layer.image.size if layer.image else 'None'}, "
                  f"local={layer.local_offset}, global={layer.global_offset}, pos=({offx},{offy})")
         
-        if (offx < canvas_size[0] and offy < canvas_size[1] and 
+        if layer.image and (offx < canvas_size[0] and offy < canvas_size[1] and 
             offx + layer.image.width > 0 and offy + layer.image.height > 0):
             canvas.alpha_composite(layer.image, (offx, offy))
     return canvas

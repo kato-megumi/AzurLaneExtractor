@@ -68,7 +68,7 @@ class RectTransform:
 class GameObjectLayer:
     """A layer in the painting hierarchy with image and transform data."""
     
-    def __init__(self, asset: AzurlaneAsset, gameobject, parent: "GameObjectLayer" = None):
+    def __init__(self, asset: AzurlaneAsset, gameobject, parent: Optional["GameObjectLayer"] = None):
         self.asset = asset
         self.gameobject = gameobject
         self.parent = parent
@@ -127,13 +127,13 @@ class GameObjectLayer:
             upscaled = upscaler.upscale(image)
             # Resize to exact target size if needed
             if upscaled.size != target_size:
-                upscaled = upscaled.resize(target_size, Image.LANCZOS)
+                upscaled = upscaled.resize(target_size, Image.Resampling.LANCZOS)
             log.debug(f"AI SCALE '{self.gameobject.m_Name}': {image.size} -> {upscaled.size}")
             return upscaled
         else:
             # Fallback to LANCZOS
             log.debug(f"SCALE Layer '{self.gameobject.m_Name}': {image.size} -> {target_size} (LANCZOS)")
-            return image.resize(target_size, Image.LANCZOS)
+            return image.resize(target_size, Image.Resampling.LANCZOS)
 
     def _loadImageFromUI(self, uiimage):
         """Load image from Unity UI Image component (without mesh)."""
@@ -174,7 +174,7 @@ class GameObjectLayer:
                     image = self._upscale_image(image, target_size)
                 else:
                     # Just resize down
-                    image = image.resize(target_size, Image.LANCZOS)
+                    image = image.resize(target_size, Image.Resampling.LANCZOS)
         
         self.image = image
         self.size = self.image.size
@@ -197,6 +197,9 @@ class GameObjectLayer:
             if self.sprite.m_Name in self.asset.skin.remap:
                 sprite_name = self.asset.skin.remap[self.sprite.m_Name]
                 self.sprite = self.asset.getObjectByName(sprite_name, ClassIDType.Sprite)
+                if not self.sprite:
+                    log.warning(f"  =Skipping layer '{self.gameobject.m_Name}': censored sprite not found")
+                    return
                 self.mesh = self.asset.getObjectByName(sprite_name + "-mesh", ClassIDType.Mesh)
         
         self.texture2d = self.sprite.m_RD.texture.read()
@@ -272,7 +275,7 @@ class GameObjectLayer:
         if (abs(image.size[0] - target_w) / max(target_w, 1) > 0.05 or
             abs(image.size[1] - target_h) / max(target_h, 1) > 0.05):
             log.warning(f"Face size mismatch for {self.asset.skin.display_name()} : {self.asset.skin.painting}, size {image.size} target face size {(target_w,target_h)} ")
-            image = image.resize((target_w, target_h), Image.LANCZOS)
+            image = image.resize((target_w, target_h), Image.Resampling.LANCZOS)
         
         self.image = image
         self.size = (target_w, target_h)
@@ -329,18 +332,19 @@ class GameObjectLayer:
                 self.local_offset = (offsetx, offsety)
             else:
                 # Stretch anchor - element fills parent (anchor_min != anchor_max)
-                sizex = (anchor_min[0] - anchor_max[0]) * self.parent.size[0]
-                sizey = (anchor_min[1] - anchor_max[1]) * self.parent.size[1]
-                self.size = (abs(sizex), abs(sizey))
+                if self.parent:
+                    sizex = (anchor_min[0] - anchor_max[0]) * self.parent.size[0]
+                    sizey = (anchor_min[1] - anchor_max[1]) * self.parent.size[1]
+                    self.size = (abs(sizex), abs(sizey))
                 self.local_offset = (0, 0)
 
         if recursive:
             for child in self.children:
                 child.calculateLocalOffset(recursive)
 
-    def calculateGlobalOffset(self, base_offset: tuple[float, float] = None, 
-                               parent_accumulated: tuple[float, float] = None,
-                               root_size: tuple[float, float] = None):
+    def calculateGlobalOffset(self, base_offset: Optional[tuple[float, float]] = None, 
+                               parent_accumulated: Optional[tuple[float, float]] = None,
+                               root_size: Optional[tuple[float, float]] = None):
         """Calculate global offset for rendering.
         
         Args:
