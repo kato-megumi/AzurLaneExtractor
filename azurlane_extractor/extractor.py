@@ -1,6 +1,7 @@
 """Main extraction logic for Azur Lane paintings."""
 import logging
 import UnityPy
+import cv2
 import numpy as np
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
@@ -13,6 +14,7 @@ from .layer import GameObjectLayer
 from .config import get_config
 from .name_map import Skin
 from .upscaler import ImageUpscaler
+
 
 log = logging.getLogger(__name__)
 
@@ -54,7 +56,9 @@ def process_paintings_concurrent(skins: list[Skin], max_workers: int = 4):
                 except Exception as e:
                     log.error(f"Error processing {skin.painting}: {e}")
                     pbar.update(1)
-
+                    
+        import os
+        os._exit(0) 
 
 def get_face_images(skin: Skin, is_censored: bool = False) -> dict[str, Image.Image]:
     """Get face images for a painting. Caches by base name."""
@@ -205,6 +209,108 @@ def _search_region(base_rgb: np.ndarray, face_rgb: np.ndarray, face_alpha: np.nd
     return best_x, best_y, best_mse
 
 
+def _find_face_by_feature_matching(base_img: Image.Image, face_img: Image.Image,
+                                   face_alpha: np.ndarray) -> tuple[int, int, float, bool]:
+    """Find face position using ORB feature matching.
+    
+    Returns:
+        (x, y, confidence, success) - position and whether matching succeeded
+    """
+    # Convert to grayscale for feature detection
+    base_gray = cv2.cvtColor(np.array(base_img.convert('RGB')), cv2.COLOR_RGB2GRAY)
+    face_gray = cv2.cvtColor(np.array(face_img.convert('RGB')), cv2.COLOR_RGB2GRAY)
+    
+    # Apply alpha mask to face - zero out transparent regions
+    face_mask = (face_alpha * 255).astype(np.uint8)
+    face_gray_masked = cv2.bitwise_and(face_gray, face_gray, mask=face_mask)
+    
+    fh, fw = face_gray.shape[:2]
+    bh, bw = base_gray.shape[:2]
+    
+    # Create ORB detector with more features for better matching
+    orb = cv2.ORB_create(nfeatures=2000, scaleFactor=1.2, nlevels=8)  # type: ignore[attr-defined]
+    
+    # Detect keypoints and compute descriptors
+    kp_face, desc_face = orb.detectAndCompute(face_gray_masked, face_mask)
+    kp_base, desc_base = orb.detectAndCompute(base_gray, None)
+    
+    if desc_face is None or desc_base is None or len(kp_face) < 4 or len(kp_base) < 4:
+        log.debug(f"Feature matching: insufficient keypoints (face={len(kp_face) if kp_face else 0}, base={len(kp_base) if kp_base else 0})")
+        return 0, 0, 0.0, False
+    
+    # Use BFMatcher with Hamming distance for ORB
+    bf = cv2.BFMatcher(cv2.NORM_HAMMING, crossCheck=False)
+    
+    # Find top 2 matches for each descriptor (for ratio test)
+    try:
+        matches = bf.knnMatch(desc_face, desc_base, k=2)
+    except cv2.error as e:
+        log.debug(f"Feature matching failed: {e}")
+        return 0, 0, 0.0, False
+    
+    # Apply Lowe's ratio test to filter good matches
+    good_matches = []
+    for match in matches:
+        if len(match) == 2:
+            m, n = match
+            if m.distance < 0.75 * n.distance:
+                good_matches.append(m)
+    
+    if len(good_matches) < 4:
+        log.debug(f"Feature matching: insufficient good matches ({len(good_matches)})")
+        return 0, 0, 0.0, False
+    
+    # Extract matched keypoint positions
+    src_pts = np.array([kp_face[m.queryIdx].pt for m in good_matches], dtype=np.float32).reshape(-1, 1, 2)
+    dst_pts = np.array([kp_base[m.trainIdx].pt for m in good_matches], dtype=np.float32).reshape(-1, 1, 2)
+    
+    # Estimate translation using RANSAC
+    # We only need translation (dx, dy), not full homography
+    try:
+        M, mask = cv2.estimateAffinePartial2D(src_pts, dst_pts, method=cv2.RANSAC, ransacReprojThreshold=5.0)
+    except cv2.error as e:
+        log.debug(f"Feature affine estimation failed: {e}")
+        return 0, 0, 0.0, False
+    
+    if M is None:
+        log.debug("Feature matching: RANSAC failed to find transform")
+        return 0, 0, 0.0, False
+    
+    # Count inliers
+    inlier_count = np.sum(mask) if mask is not None else 0
+    inlier_ratio = inlier_count / len(good_matches) if good_matches else 0
+    
+    # Extract translation (ignore rotation/scale for now, but check they're minimal)
+    scale_x = np.sqrt(M[0, 0]**2 + M[1, 0]**2)
+    scale_y = np.sqrt(M[0, 1]**2 + M[1, 1]**2)
+    rotation = np.arctan2(M[1, 0], M[0, 0]) * 180 / np.pi
+    
+    # Reject if significant rotation or scale change
+    if abs(scale_x - 1.0) > 0.1 or abs(scale_y - 1.0) > 0.1 or abs(rotation) > 5:
+        log.debug(f"Feature matching: rejected due to transform (scale={scale_x:.3f},{scale_y:.3f}, rot={rotation:.1f}°)")
+        return 0, 0, 0.0, False
+    
+    # Translation is M[0,2] and M[1,2]
+    tx = M[0, 2]
+    ty = M[1, 2]
+    
+    # The translation tells us: to align face to base, shift face by (tx, ty)
+    # So the face position in base is at (tx, ty) for the face's origin (0,0)
+    face_x = int(round(tx))
+    face_y = int(round(ty))
+    
+    # Clamp to valid range
+    face_x = max(0, min(bw - fw, face_x))
+    face_y = max(0, min(bh - fh, face_y))
+    
+    # Confidence based on inlier ratio and number of matches
+    confidence = float(inlier_ratio) * min(1.0, len(good_matches) / 20.0)
+    
+    log.debug(f"Feature matching: pos=({face_x}, {face_y}), inliers={inlier_count}/{len(good_matches)}, confidence={confidence:.2f}")
+    
+    return face_x, face_y, confidence, True
+
+
 def find_best_face_offset(base_img: Image.Image, face_img: Image.Image | list[Image.Image], 
                           calc_x: int, calc_y: int,
                           search_radius: int = 3,
@@ -258,44 +364,66 @@ def find_best_face_offset(base_img: Image.Image, face_img: Image.Image | list[Im
     if best_mse > mse_threshold:
         expanded = True
         
-        # For small faces (<120px), skip the coarse step (16px) as it's too large
-        skip_coarse = (fh < 120 or fw < 120)
+        # Try feature matching first - faster and often more accurate
+        feat_x, feat_y, feat_conf, feat_success = _find_face_by_feature_matching(
+            base_img, face_images[0], first_face_alpha
+        )
         
-        if skip_coarse:
-            # Skip Phase 2, go directly to medium search over full image
-            log.debug(f"Face size {fw}x{fh} < 120px, skipping 16px coarse step")
-            coarse_x, coarse_y = 0, 0
-            medium_radius = max(bw - fw, bh - fh)  # Search full image with medium step
-        else:
-            # Phase 2: Coarse search over entire image (step=16)
-            coarse_step = 16
-            x_range_full = range(0, bw - fw + 1)
-            y_range_full = range(0, bh - fh + 1)
+        if feat_success and feat_conf >= 0.3:
+            # Feature matching succeeded - refine with local MSE search
+            fine_radius = 4
+            x_range_fine = range(max(0, feat_x - fine_radius), min(bw - fw + 1, feat_x + fine_radius + 1))
+            y_range_fine = range(max(0, feat_y - fine_radius), min(bh - fh + 1, feat_y + fine_radius + 1))
             
-            coarse_x, coarse_y, coarse_mse = _search_region(
-                base_rgb, first_face_rgb, first_face_alpha, x_range_full, y_range_full, step=coarse_step
+            fine_x, fine_y, fine_mse = _search_region(
+                base_rgb, first_face_rgb, first_face_alpha, x_range_fine, y_range_fine, step=1
             )
-            medium_radius = coarse_step
-        
-        # Phase 3: Medium search around coarse result (step=4)
-        x_range_med = range(max(0, coarse_x - medium_radius), min(bw - fw + 1, coarse_x + medium_radius + 1))
-        y_range_med = range(max(0, coarse_y - medium_radius), min(bh - fh + 1, coarse_y + medium_radius + 1))
-        
-        med_x, med_y, med_mse = _search_region(
-            base_rgb, first_face_rgb, first_face_alpha, x_range_med, y_range_med, step=4
-        )
-        
-        # Phase 4: Fine search around medium result (step=1)
-        fine_radius = 4
-        x_range_fine = range(max(0, med_x - fine_radius), min(bw - fw + 1, med_x + fine_radius + 1))
-        y_range_fine = range(max(0, med_y - fine_radius), min(bh - fh + 1, med_y + fine_radius + 1))
-        
-        fine_x, fine_y, fine_mse = _search_region(
-            base_rgb, first_face_rgb, first_face_alpha, x_range_fine, y_range_fine, step=1
-        )
-        
-        if fine_mse < best_mse:
-            best_x, best_y, best_mse = fine_x, fine_y, fine_mse
+            
+            if fine_mse < best_mse:
+                best_x, best_y, best_mse = fine_x, fine_y, fine_mse
+                log.debug(f"Feature matching found position ({feat_x}, {feat_y}), refined to ({best_x}, {best_y}) MSE={best_mse:.0f}")
+        else:
+            # Feature matching failed - fall back to coarse-to-fine MSE search
+            log.debug(f"Feature matching failed (success={feat_success}, conf={feat_conf:.2f}), falling back to MSE search")
+            
+            # For small faces (<120px), skip the coarse step (16px) as it's too large
+            skip_coarse = (fh < 120 or fw < 120)
+            
+            if skip_coarse:
+                # Skip Phase 2, go directly to medium search over full image
+                log.debug(f"Face size {fw}x{fh} < 120px, skipping 16px coarse step")
+                coarse_x, coarse_y = 0, 0
+                medium_radius = max(bw - fw, bh - fh)  # Search full image with medium step
+            else:
+                # Phase 2: Coarse search over entire image (step=16)
+                coarse_step = 16
+                x_range_full = range(0, bw - fw + 1)
+                y_range_full = range(0, bh - fh + 1)
+                
+                coarse_x, coarse_y, coarse_mse = _search_region(
+                    base_rgb, first_face_rgb, first_face_alpha, x_range_full, y_range_full, step=coarse_step
+                )
+                medium_radius = coarse_step
+            
+            # Phase 3: Medium search around coarse result (step=4)
+            x_range_med = range(max(0, coarse_x - medium_radius), min(bw - fw + 1, coarse_x + medium_radius + 1))
+            y_range_med = range(max(0, coarse_y - medium_radius), min(bh - fh + 1, coarse_y + medium_radius + 1))
+            
+            med_x, med_y, med_mse = _search_region(
+                base_rgb, first_face_rgb, first_face_alpha, x_range_med, y_range_med, step=4
+            )
+            
+            # Phase 4: Fine search around medium result (step=1)
+            fine_radius = 4
+            x_range_fine = range(max(0, med_x - fine_radius), min(bw - fw + 1, med_x + fine_radius + 1))
+            y_range_fine = range(max(0, med_y - fine_radius), min(bh - fh + 1, med_y + fine_radius + 1))
+            
+            fine_x, fine_y, fine_mse = _search_region(
+                base_rgb, first_face_rgb, first_face_alpha, x_range_fine, y_range_fine, step=1
+            )
+            
+            if fine_mse < best_mse:
+                best_x, best_y, best_mse = fine_x, fine_y, fine_mse
     
     offset_x = best_x - calc_x
     offset_y = best_y - calc_y
