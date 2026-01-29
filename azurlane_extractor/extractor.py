@@ -205,7 +205,7 @@ def _search_region(base_rgb: np.ndarray, face_rgb: np.ndarray, face_alpha: np.nd
     return best_x, best_y, best_mse
 
 
-def find_best_face_offset(base_img: Image.Image, face_img: Image.Image, 
+def find_best_face_offset(base_img: Image.Image, face_img: Image.Image | list[Image.Image], 
                           calc_x: int, calc_y: int,
                           search_radius: int = 3,
                           mse_threshold: float = 2000.0) -> tuple[tuple[int, int], float, bool]:
@@ -213,7 +213,7 @@ def find_best_face_offset(base_img: Image.Image, face_img: Image.Image,
     
     Args:
         base_img: The base painting image (without face overlay)
-        face_img: The face image to match
+        face_img: The face image(s) to match - single image or list of up to 3 images
         calc_x, calc_y: Calculated position to search around
         search_radius: Pixels to search in each direction
         mse_threshold: If MSE exceeds this, expand search to whole image
@@ -222,40 +222,67 @@ def find_best_face_offset(base_img: Image.Image, face_img: Image.Image,
         ((offset_x, offset_y), final_mse, expanded_search) - offset adjustment, MSE value, whether expanded search was used
     """
     
-    base_rgb = np.array(base_img.convert('RGB')).astype(np.float32)
-    face_rgb = np.array(face_img.convert('RGB')).astype(np.float32)
-    face_alpha = np.array(face_img)[:, :, 3].astype(np.float32) / 255.0
+    # Convert single image to list
+    face_images = [face_img] if not isinstance(face_img, list) else face_img[:3]  # Limit to 3 faces
     
-    fh, fw = face_rgb.shape[:2]
+    base_rgb = np.array(base_img.convert('RGB')).astype(np.float32)
     bh, bw = base_rgb.shape[:2]
     
-    # Phase 1: Local search around calculated position
-    x_range = range(max(0, calc_x - search_radius), min(bw - fw + 1, calc_x + search_radius + 1))
-    y_range = range(max(0, calc_y - search_radius), min(bh - fh + 1, calc_y + search_radius + 1))
+    # Phase 1: Local search around calculated position using up to 3 faces
+    best_x, best_y, best_mse = calc_x, calc_y, float('inf')
     
-    best_x, best_y, best_mse = _search_region(base_rgb, face_rgb, face_alpha, x_range, y_range)
+    # Use the first face for expanded search if needed
+    first_face_rgb = np.array(face_images[0].convert('RGB')).astype(np.float32)
+    first_face_alpha = np.array(face_images[0])[:, :, 3].astype(np.float32) / 255.0
+    fh, fw = first_face_rgb.shape[:2]
+    
+    for face_image in face_images:
+        face_rgb = np.array(face_image.convert('RGB')).astype(np.float32)
+        face_alpha = np.array(face_image)[:, :, 3].astype(np.float32) / 255.0
+        
+        face_h, face_w = face_rgb.shape[:2]
+        
+        x_range = range(max(0, calc_x - search_radius), min(bw - face_w + 1, calc_x + search_radius + 1))
+        y_range = range(max(0, calc_y - search_radius), min(bh - face_h + 1, calc_y + search_radius + 1))
+        
+        x, y, mse = _search_region(base_rgb, face_rgb, face_alpha, x_range, y_range)
+        if mse < best_mse:
+            best_x, best_y, best_mse = x, y, mse
+            # Early out if match is good enough
+            if best_mse <= mse_threshold:
+                break
+    
     expanded = False
     
     # Check if match is good enough
     if best_mse > mse_threshold:
         expanded = True
         
-        # Phase 2: Coarse search over entire image (step=16)
-        coarse_step = 16
-        x_range_full = range(0, bw - fw + 1)
-        y_range_full = range(0, bh - fh + 1)
+        # For small faces (<120px), skip the coarse step (16px) as it's too large
+        skip_coarse = (fh < 120 or fw < 120)
         
-        coarse_x, coarse_y, coarse_mse = _search_region(
-            base_rgb, face_rgb, face_alpha, x_range_full, y_range_full, step=coarse_step
-        )
+        if skip_coarse:
+            # Skip Phase 2, go directly to medium search over full image
+            log.debug(f"Face size {fw}x{fh} < 120px, skipping 16px coarse step")
+            coarse_x, coarse_y = 0, 0
+            medium_radius = max(bw - fw, bh - fh)  # Search full image with medium step
+        else:
+            # Phase 2: Coarse search over entire image (step=16)
+            coarse_step = 16
+            x_range_full = range(0, bw - fw + 1)
+            y_range_full = range(0, bh - fh + 1)
+            
+            coarse_x, coarse_y, coarse_mse = _search_region(
+                base_rgb, first_face_rgb, first_face_alpha, x_range_full, y_range_full, step=coarse_step
+            )
+            medium_radius = coarse_step
         
         # Phase 3: Medium search around coarse result (step=4)
-        medium_radius = coarse_step
         x_range_med = range(max(0, coarse_x - medium_radius), min(bw - fw + 1, coarse_x + medium_radius + 1))
         y_range_med = range(max(0, coarse_y - medium_radius), min(bh - fh + 1, coarse_y + medium_radius + 1))
         
         med_x, med_y, med_mse = _search_region(
-            base_rgb, face_rgb, face_alpha, x_range_med, y_range_med, step=4
+            base_rgb, first_face_rgb, first_face_alpha, x_range_med, y_range_med, step=4
         )
         
         # Phase 4: Fine search around medium result (step=1)
@@ -264,7 +291,7 @@ def find_best_face_offset(base_img: Image.Image, face_img: Image.Image,
         y_range_fine = range(max(0, med_y - fine_radius), min(bh - fh + 1, med_y + fine_radius + 1))
         
         fine_x, fine_y, fine_mse = _search_region(
-            base_rgb, face_rgb, face_alpha, x_range_fine, y_range_fine, step=1
+            base_rgb, first_face_rgb, first_face_alpha, x_range_fine, y_range_fine, step=1
         )
         
         if fine_mse < best_mse:
@@ -418,19 +445,38 @@ def _process_single_painting(skin: Skin, is_censored: bool, asset: AzurlaneAsset
                 base_img = render_image(parent_goi, facelayer, canvas_size, 
                                        offset_adjustment, None)
                 
-                # Use face '0' if available, otherwise first face
-                match_face_img = face_images.get('0') or next(iter(face_images.values()))
+                # Prepare up to 3 face images for template matching
+                match_face_imgs = []
+                if '0' in face_images:
+                    match_face_imgs.append(face_images['0'])
+                # Add up to 2 more faces from the remaining faces
+                for face_key, face_img in face_images.items():
+                    if face_key != '0' and len(match_face_imgs) < 3:
+                        match_face_imgs.append(face_img)
                 
-                # Calculate base position for face
-                facelayer.loadImageSimple(match_face_img)
-                match_face_img = facelayer.image  # Reload face image with correct size
+                if not match_face_imgs:
+                    match_face_imgs.append(next(iter(face_images.values())))
+                
+                # Calculate base position for face using first face for sizing
+                first_face = match_face_imgs[0]
+                facelayer.loadImageSimple(first_face)
+                # Reload all face images with correct size - use facelayer.image for first, keep originals for rest
+                if facelayer.image is not None:
+                    match_face_imgs = [facelayer.image] + [img for img in match_face_imgs[1:] if img is not None]
+                else:
+                    match_face_imgs = [img for img in match_face_imgs if img is not None]
+                
+                if not match_face_imgs:
+                    log.warning(f"{display_name}: No valid face images found for matching")
+                    match_face_imgs = [first_face]  # Fallback to original first face
+                
                 calc_x = int(facelayer.global_offset[0] + offset_adjustment[0])
                 calc_y = int(facelayer.global_offset[1] + offset_adjustment[1])
                 
                 if has_face_zero:
                     # mse_threshold=float('inf') means don't expand for face '0' case
                     face_alignment_offset, mse, expanded = find_best_face_offset(
-                        base_img, match_face_img, calc_x, calc_y)
+                        base_img, match_face_imgs, calc_x, calc_y)
                     
                     # Check if base has a face by matching face '0' against base
                     # Bad match (high MSE) → base has no face → use coherence search
@@ -438,7 +484,7 @@ def _process_single_painting(skin: Skin, is_censored: bool, asset: AzurlaneAsset
                     # Good but non-complete match → base has different face → include base
                     if mse > 2000:  # Bad match - no base face, use coherence search
                         coherence_offset, coherence_score = find_coherent_face_offset(
-                            base_img, match_face_img, calc_x, calc_y)
+                            base_img, first_face, calc_x, calc_y)
                         if coherence_score != float('inf'):
                             face_alignment_offset = coherence_offset
                             log.warning(f"{display_name}: No base face detected, using coherence offset={coherence_offset} (score={coherence_score:.0f})")
@@ -453,7 +499,7 @@ def _process_single_painting(skin: Skin, is_censored: bool, asset: AzurlaneAsset
                 else:
                     # No face '0' - base definitely has a face baked in
                     frames.append(base_img.convert('RGBA'))
-                    face_alignment_offset, mse, expanded = find_best_face_offset(base_img, match_face_img, calc_x, calc_y)
+                    face_alignment_offset, mse, expanded = find_best_face_offset(base_img, match_face_imgs, calc_x, calc_y)
                     if expanded:
                         log.warning(f"{display_name}: Face position misaligned, used expanded search (MSE={mse:.0f}), offset={face_alignment_offset}")
                     elif face_alignment_offset != (0, 0):
