@@ -8,8 +8,9 @@ from requests_cache import CachedSession
 
 from .constants import (
     CACHE_NAME,
+    SECRETARY_SHIP_URL,
     SHIP_SKIN_URL,
-    SKIN_PAINTING_URL,
+    SHIP_SKIN_TEMPLATE_URL,
     PAINTING_MAP_URL,
 )
 from .config import get_config
@@ -101,21 +102,62 @@ def fetch_name_map() -> ShipCollection:
     # Store cache in project folder (parent of this module's directory)
     project_dir = Path(__file__).parent.parent
     cache_path = project_dir / CACHE_NAME
-    session = CachedSession(str(cache_path), cache_control=True)
+    session = CachedSession(str(cache_path), 
+                            # cache_control=True,
+                            expire_after=60*60*24,  # 1 day
+                            )
     
     try:
         log.debug("Fetching ship skin data...")
-        resp = session.get(SKIN_PAINTING_URL, timeout=15)
-        skin_painting = resp.json()
+        resp = session.get(SHIP_SKIN_TEMPLATE_URL, timeout=15)
+        ship_skin_template = resp.json()
+        resp.close()
         resp = session.get(PAINTING_MAP_URL, timeout=15)
         painting_map = resp.json()
+        resp.close()
         resp = session.get(SHIP_SKIN_URL, timeout=15)
         ship_skin_list = resp.json()
+        resp.close()
+        resp = session.get(SECRETARY_SHIP_URL, timeout=15)
+        secretary_ship_json = resp.json()
+        resp.close()
     except Exception as e:
         log.error(f"Failed to fetch name map data: {e}")
         return ShipCollection()
 
     ship_collection = ShipCollection()
+
+    for ship_id, skin_list in secretary_ship_json["get_id_list_by_character_id"].items():
+        ship = Ship(id=int(ship_id), name=secretary_ship_json[str(ship_id)]["name"])
+        ship_collection.ships.append(ship)
+        for skin_id in skin_list:
+            painting = secretary_ship_json[str(skin_id)]["prefab"]
+            if painting in painting_map:
+                res_list = painting_map[painting].get("res_list", [])
+            else:
+                res_list = [painting]
+            res_list = [r[len("painting/"):] if r.startswith("painting/") else r for r in res_list]
+            
+            name = str(skin_id)
+            for ship_id, ship_data in ship_skin_template.items():
+                if ship_data["painting"] == painting:
+                    name = ship_data["name"]
+                    type_id = ship_data.get("skin_type", 9999)
+                    break
+            skin = Skin(
+                    skin_id=skin_id,
+                    painting=painting,
+                    res_list=res_list,
+                    have_censor=False,
+                    texture_only_censor=False,
+                    remap={},
+                    name=name,
+                    type="Others",
+                    ship=ship,
+                    tag=[]
+                )
+            ship_collection.skins.append(skin)
+            ship.skins.append(skin)
 
     for entry in ship_skin_list:
         ship_id = entry.get("gid")
@@ -124,7 +166,7 @@ def fetch_name_map() -> ShipCollection:
 
         for s in entry.get("skins"):
             skin_id = s.get("id")
-            skin_data = skin_painting.get(str(skin_id))
+            skin_data = ship_skin_template.get(str(skin_id))
             if (not skin_data) or (ship_id != skin_data.get("ship_group")):
                 continue
                 
