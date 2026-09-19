@@ -3,8 +3,8 @@ import re
 
 # Name map caching
 SHIP_SKIN_URL = "https://raw.githubusercontent.com/Fernando2603/AzurLane/main/ship_skin_list.json"
-SHIP_SKIN_TEMPLATE_URL = "https://raw.githubusercontent.com/AzurLaneTools/AzurLaneData/main/EN/ShareCfg/ship_skin_template.json"
-PAINTING_MAP_URL = "https://raw.githubusercontent.com/AzurLaneTools/AzurLaneData/main/EN/ShareCfg/painting_filte_map.json"
+SHIP_SKIN_TEMPLATE_URL = "https://raw.githubusercontent.com/Fernando2603/AzurLaneData/main/sharecfgdata/ship_skin_template.json"
+PAINTING_MAP_URL = "https://raw.githubusercontent.com/Fernando2603/AzurLaneData/main/sharecfg/painting_filte_map.json"
 SECRETARY_SHIP_URL = "https://raw.githubusercontent.com/AzurLaneTools/AzurLaneData/refs/heads/main/EN/ShareCfg/secretary_special_ship.json"
 CACHE_NAME = "AzurlaneCache"
 
