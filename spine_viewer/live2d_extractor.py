@@ -138,7 +138,7 @@ def extract_live2d_model(bundle_path: Path, cache_dir: Path, force: bool = False
         try:
             with open(manifest_path, "r", encoding="utf-8") as f:
                 cached = json.load(f)
-                if "Motions" in cached.get("FileReferences", {}) and cached.get("Meta", {}).get("extractorVersion") == 2:
+                if "Motions" in cached.get("FileReferences", {}) and cached.get("Meta", {}).get("extractorVersion") == 3:
                     return cached
         except Exception:
             pass
@@ -247,7 +247,7 @@ def extract_live2d_model(bundle_path: Path, cache_dir: Path, force: bool = False
             "type": "live2d",
             "paramCount": len(param_ids),
             "motions": list(motion_refs.keys()),
-            "extractorVersion": 2,
+            "extractorVersion": 3,
         }
     }
 
@@ -312,7 +312,8 @@ def _read_streamed_clip(streamed_clip) -> List[Tuple[float, List[Dict[str, Any]]
         for _ in range(num_keys):
             idx, c0, c1, c2, c3 = struct.unpack_from("<iffff", raw_bytes, pos)
             pos += 20
-            keys.append({"index": idx, "value": c3})
+            is_stepped = abs(c0) < 1e-4 and abs(c1) < 1e-4 and abs(c2) < 1e-4
+            keys.append({"index": idx, "value": c3, "stepped": is_stepped})
         frames.append((time, keys))
     return frames
 
@@ -385,7 +386,7 @@ def _extract_animation_clips(env, crc_to_path: Dict[int, str], motions_dir: Path
                     for k in k_list:
                         idx = k["index"]
                         if idx in curve_keyframes:
-                            curve_keyframes[idx].append((t_sec, round(k["value"], 4)))
+                            curve_keyframes[idx].append((t_sec, round(k["value"], 4), k.get("stepped", False)))
 
                 for i, (target_type, target_id) in enumerate(curve_bindings):
                     kfs = curve_keyframes[i]
@@ -399,8 +400,9 @@ def _extract_animation_clips(env, crc_to_path: Dict[int, str], motions_dir: Path
                         segments = [0.0, compact[0][1], 0, duration, compact[0][1]]
                     else:
                         segments = [compact[0][0], compact[0][1]]
-                        for k in compact[1:]:
-                            segments.extend([0, k[0], k[1]])
+                        for prev_k, curr_k in zip(compact[:-1], compact[1:]):
+                            seg_type = 2 if prev_k[2] else 0
+                            segments.extend([seg_type, curr_k[0], curr_k[1]])
                     num_segs = (len(segments) - 2) // 3
                     total_segments += num_segs
                     total_points += (1 + num_segs)
