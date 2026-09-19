@@ -2029,17 +2029,64 @@
       if (!model || !model.internalModel || !model.internalModel.coreModel) return;
       const im = model.internalModel;
       const core = im.coreModel;
-      const count = core.getParameterCount();
+      const mm = im.motionManager;
+      const pCount = core.getParameterCount();
+      const partCount = core.getPartCount();
 
-      // Cache model rest pose default values
-      const defaults = new Float32Array(count);
-      for (let i = 0; i < count; i++) {
-        defaults[i] = core.getParameterDefaultValue(i);
+      // Cache model rest pose default values from Cubism Core setup pose
+      const defaultParameters = new Float32Array(pCount);
+      for (let i = 0; i < pCount; i++) {
+        defaultParameters[i] = core.getParameterDefaultValue(i);
+      }
+
+      const defaultPartOpacities = new Float32Array(partCount);
+      for (let i = 0; i < partCount; i++) {
+        defaultPartOpacities[i] = core.getPartOpacityByIndex(i);
+      }
+
+      // Intercept motion starts to immediately restore unkeyed parameters & part opacities to baseline defaults
+      if (mm && !mm._poseRestorationHooked) {
+        mm._poseRestorationHooked = true;
+        const origStartMotion = mm._startMotion;
+        mm._startMotion = function(motion, onFinish) {
+          if (motion && motion._motionData && motion._motionData.curves) {
+            const curves = motion._motionData.curves;
+            const curveCount = motion._motionData.curveCount;
+            const keyedParams = new Set();
+            const keyedParts = new Set();
+
+            for (let i = 0; i < curveCount; i++) {
+              const c = curves[i];
+              if (c.type === 1) keyedParams.add(c.id);
+              else if (c.type === 2) keyedParts.add(c.id);
+            }
+
+            // Restore baseline defaults for any parameter omitted by the incoming motion
+            for (let i = 0; i < pCount; i++) {
+              const id = core._parameterIds ? core._parameterIds[i] : null;
+              if (id && !keyedParams.has(id)) {
+                const defVal = defaultParameters[i];
+                core.setParameterValueByIndex(i, defVal);
+                if (core._savedParameters) core._savedParameters[i] = defVal;
+              }
+            }
+
+            // Restore baseline defaults for any part opacity omitted by the incoming motion
+            for (let i = 0; i < partCount; i++) {
+              const id = core._partIds ? core._partIds[i] : null;
+              if (id && !keyedParts.has(id)) {
+                const defOp = defaultPartOpacities[i];
+                core.setPartOpacityByIndex(i, defOp);
+              }
+            }
+          }
+          return origStartMotion.call(this, motion, onFinish);
+        };
       }
 
       let lastTime = performance.now();
 
-      // Hook beforeMotionUpdate: smoothly decay unmanaged or lingering parameters
+      // Hook beforeMotionUpdate: smoothly decay unmanaged or lingering parameters and part opacities
       // toward their resting defaults (tau = 0.25s matching Azur Lane Live2dChar DampingTime)
       im.on("beforeMotionUpdate", () => {
         const now = performance.now();
@@ -2048,15 +2095,31 @@
 
         const factor = 1 - Math.exp(-dt / 0.25);
 
-        for (let i = 0; i < count; i++) {
+        for (let i = 0; i < pCount; i++) {
           const cur = core.getParameterValueByIndex(i);
-          const def = defaults[i];
+          const def = defaultParameters[i];
           const diff = def - cur;
           if (Math.abs(diff) > 0.0001) {
             if (Math.abs(diff) < 0.001) {
               core.setParameterValueByIndex(i, def);
+              if (core._savedParameters) core._savedParameters[i] = def;
             } else {
-              core.setParameterValueByIndex(i, cur + diff * factor);
+              const newVal = cur + diff * factor;
+              core.setParameterValueByIndex(i, newVal);
+              if (core._savedParameters) core._savedParameters[i] = newVal;
+            }
+          }
+        }
+
+        for (let i = 0; i < partCount; i++) {
+          const cur = core.getPartOpacityByIndex(i);
+          const def = defaultPartOpacities[i];
+          const diff = def - cur;
+          if (Math.abs(diff) > 0.0001) {
+            if (Math.abs(diff) < 0.001) {
+              core.setPartOpacityByIndex(i, def);
+            } else {
+              core.setPartOpacityByIndex(i, cur + diff * factor);
             }
           }
         }
