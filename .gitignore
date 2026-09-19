@@ -7,3 +7,4 @@ test_scripts/
 output_text/
 *.sqlite
 .github/copilot-instructions.md
+spine_cache/

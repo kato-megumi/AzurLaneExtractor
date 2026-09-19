@@ -6,6 +6,10 @@ import UnityPy
 from UnityPy.classes import GameObject
 from UnityPy.enums import ClassIDType
 
+# Azur Lane bundles ship with a stub "5.x.x" version header; UnityPy cannot
+# parse it and falls back to this version for typetree resolution.
+UnityPy.config.FALLBACK_UNITY_VERSION = "2020.3.48f1"
+
 from azurlane_extractor.name_map import Skin
 
 from .config import get_config

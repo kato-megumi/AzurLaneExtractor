@@ -105,7 +105,11 @@ class GameObjectLayer:
                 self._loadImageFromUI(self.uiimage)
 
     def __repr__(self):
-        return f"<{self.__class__.__name__} {self.gameobject.name}>"
+        try:
+            name = self.gameobject.m_Name
+        except Exception:
+            name = "unknown"
+        return f"<{self.__class__.__name__} {name}>"
 
     def _save_texture(self, image: Image.Image):
         """Save unscaled layer image to debug output directory."""

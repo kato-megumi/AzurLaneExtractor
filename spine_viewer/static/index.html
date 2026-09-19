@@ -1,0 +1,1378 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Azur Lane Spine 2D Viewer</title>
+  <script src="/static/spine-webgl.js"></script>
+  <style>
+    :root {
+      --bg: #0f1218;
+      --card-bg: rgba(22, 27, 34, 0.85);
+      --card-border: rgba(255, 255, 255, 0.1);
+      --text: #e6edf3;
+      --text-muted: #8b949e;
+      --primary: #58a6ff;
+      --primary-hover: #79b8ff;
+      --accent: #3fb950;
+      --danger: #f85149;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      user-select: none;
+    }
+
+    body, html {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      background-color: var(--bg);
+      color: var(--text);
+    }
+
+    #canvas-container {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      z-index: 1;
+      cursor: grab;
+    }
+
+    #canvas-container.grabbing {
+      cursor: grabbing;
+    }
+
+    #spine-canvas {
+      width: 100%;
+      height: 100%;
+      display: block;
+    }
+
+    /* Background patterns */
+    .bg-checkerboard {
+      background-image: linear-gradient(45deg, #1b2028 25%, transparent 25%), 
+                        linear-gradient(-45deg, #1b2028 25%, transparent 25%), 
+                        linear-gradient(45deg, transparent 75%, #1b2028 75%), 
+                        linear-gradient(-45deg, transparent 75%, #1b2028 75%);
+      background-size: 24px 24px;
+      background-position: 0 0, 0 12px, 12px -12px, -12px 0px;
+      background-color: #12161c;
+    }
+    .bg-dark { background-color: #14171d; }
+    .bg-black { background-color: #000000; }
+    .bg-white { background-color: #ffffff; }
+
+    /* Glass UI overlay panels */
+    .glass-panel {
+      background: var(--card-bg);
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+      border: 1px solid var(--card-border);
+      border-radius: 12px;
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+      z-index: 10;
+    }
+
+    /* Header Bar */
+    header {
+      position: absolute;
+      top: 16px;
+      left: 16px;
+      right: 16px;
+      height: 60px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 20px;
+      gap: 16px;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-size: 17px;
+      font-weight: 700;
+      letter-spacing: 0.5px;
+      white-space: nowrap;
+    }
+
+    .brand svg {
+      fill: var(--primary);
+    }
+
+    .search-group {
+      flex: 1;
+      max-width: 480px;
+      position: relative;
+    }
+
+    .search-input {
+      width: 100%;
+      height: 38px;
+      background: rgba(13, 17, 23, 0.7);
+      border: 1px solid var(--card-border);
+      border-radius: 8px;
+      color: var(--text);
+      padding: 0 12px 0 34px;
+      font-size: 14px;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+
+    .search-input:focus {
+      border-color: var(--primary);
+    }
+
+    .search-icon {
+      position: absolute;
+      left: 10px;
+      top: 10px;
+      width: 16px;
+      height: 16px;
+      fill: var(--text-muted);
+      pointer-events: none;
+    }
+
+    .character-dropdown {
+      position: absolute;
+      top: 44px;
+      left: 0;
+      right: 0;
+      max-height: 360px;
+      overflow-y: auto;
+      background: #161b22;
+      border: 1px solid var(--card-border);
+      border-radius: 8px;
+      box-shadow: 0 12px 28px rgba(0, 0, 0, 0.6);
+      display: none;
+      z-index: 100;
+    }
+
+    .dropdown-item {
+      padding: 10px 14px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      cursor: pointer;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+      font-size: 13.5px;
+      transition: background 0.15s;
+    }
+
+    .dropdown-item:hover, .dropdown-item.active {
+      background: rgba(88, 166, 255, 0.15);
+    }
+
+    .dropdown-item .char-name {
+      font-weight: 600;
+      color: var(--text);
+    }
+
+    .dropdown-item .char-skin {
+      color: var(--primary);
+      font-size: 12.5px;
+      font-weight: 500;
+      margin-top: 2px;
+    }
+
+    .dropdown-item .char-tag {
+      font-size: 11px;
+      padding: 2px 6px;
+      border-radius: 4px;
+      background: rgba(255, 255, 255, 0.1);
+      color: var(--text-muted);
+    }
+
+    .model-info-banner {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 4px 12px;
+      background: rgba(88, 166, 255, 0.1);
+      border: 1px solid rgba(88, 166, 255, 0.25);
+      border-radius: 8px;
+      font-size: 13.5px;
+      white-space: nowrap;
+    }
+
+    .model-ship-title {
+      font-weight: 700;
+      color: #fff;
+    }
+
+    .model-title-sep {
+      color: var(--text-muted);
+    }
+
+    .model-skin-title {
+      color: var(--primary);
+      font-weight: 600;
+    }
+
+    .model-skin-badge {
+      font-size: 11px;
+      padding: 1px 6px;
+      border-radius: 4px;
+      background: rgba(88, 166, 255, 0.2);
+      color: #79c0ff;
+      font-weight: 500;
+    }
+
+    .active-skin-display {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 13px;
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid var(--card-border);
+      border-radius: 6px;
+      padding: 4px 10px;
+    }
+
+    .active-skin-display .skin-label {
+      color: var(--text-muted);
+    }
+
+    .active-skin-display .skin-name-text {
+      color: var(--primary);
+      font-weight: 600;
+    }
+
+    .header-actions {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    /* Controls Dock (Bottom) */
+    .controls-dock {
+      position: absolute;
+      bottom: 20px;
+      left: 50%;
+      transform: translateX(-50%);
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      padding: 14px 18px;
+      width: min(840px, calc(100% - 32px));
+    }
+
+    .playback-bar {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+    }
+
+    .btn {
+      background: rgba(255, 255, 255, 0.08);
+      border: 1px solid var(--card-border);
+      border-radius: 8px;
+      color: var(--text);
+      padding: 7px 14px;
+      font-size: 13px;
+      font-weight: 500;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      transition: all 0.2s;
+    }
+
+    .btn:hover {
+      background: rgba(255, 255, 255, 0.16);
+      border-color: rgba(255, 255, 255, 0.25);
+    }
+
+    .btn-icon {
+      width: 36px;
+      height: 36px;
+      padding: 0;
+    }
+
+    .btn-primary {
+      background: var(--primary);
+      color: #0d1117;
+      border-color: var(--primary);
+      font-weight: 600;
+    }
+
+    .btn-primary:hover {
+      background: var(--primary-hover);
+    }
+
+    .btn.active {
+      background: rgba(63, 185, 80, 0.2);
+      border-color: var(--accent);
+      color: var(--accent);
+    }
+
+    .select-dropdown {
+      height: 36px;
+      background: rgba(13, 17, 23, 0.8);
+      border: 1px solid var(--card-border);
+      border-radius: 8px;
+      color: var(--text);
+      padding: 0 10px;
+      font-size: 13px;
+      outline: none;
+      cursor: pointer;
+    }
+
+    .select-dropdown:focus {
+      border-color: var(--primary);
+    }
+
+    .timeline-container {
+      flex: 1;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .scrubber {
+      flex: 1;
+      -webkit-appearance: none;
+      appearance: none;
+      height: 6px;
+      border-radius: 3px;
+      background: rgba(255, 255, 255, 0.15);
+      outline: none;
+      cursor: pointer;
+    }
+
+    .scrubber::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      appearance: none;
+      width: 14px;
+      height: 14px;
+      border-radius: 50%;
+      background: var(--primary);
+      cursor: pointer;
+      transition: transform 0.1s;
+    }
+
+    .scrubber::-webkit-slider-thumb:hover {
+      transform: scale(1.2);
+    }
+
+    .time-label {
+      font-size: 12px;
+      color: var(--text-muted);
+      min-width: 90px;
+      text-align: right;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .options-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      flex-wrap: wrap;
+      padding-top: 6px;
+      border-top: 1px solid rgba(255, 255, 255, 0.06);
+    }
+
+    .toggle-group {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .toggle-label {
+      font-size: 12.5px;
+      color: var(--text-muted);
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      cursor: pointer;
+    }
+
+    /* Loading overlay */
+    #loading-overlay {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(15, 18, 24, 0.7);
+      backdrop-filter: blur(8px);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 16px;
+      z-index: 50;
+      transition: opacity 0.3s;
+      pointer-events: none;
+      opacity: 0;
+    }
+
+    #loading-overlay.active {
+      opacity: 1;
+      pointer-events: all;
+    }
+
+    .spinner {
+      width: 44px;
+      height: 44px;
+      border: 3px solid rgba(88, 166, 255, 0.2);
+      border-top-color: var(--primary);
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+
+    #loading-text {
+      font-size: 14px;
+      font-weight: 500;
+      color: var(--text);
+    }
+
+    /* Status Toast */
+    #toast {
+      position: absolute;
+      top: 86px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: rgba(22, 27, 34, 0.95);
+      border: 1px solid var(--card-border);
+      padding: 8px 16px;
+      border-radius: 8px;
+      font-size: 13px;
+      color: var(--text);
+      z-index: 100;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.2s, transform 0.2s;
+    }
+
+    #toast.show {
+      opacity: 1;
+      transform: translateX(-50%) translateY(4px);
+    }
+  </style>
+</head>
+<body>
+
+  <!-- WebGL Rendering Canvas -->
+  <div id="canvas-container" class="bg-checkerboard">
+    <canvas id="spine-canvas"></canvas>
+  </div>
+
+  <!-- Header -->
+  <header class="glass-panel">
+    <div class="brand">
+      <svg width="22" height="22" viewBox="0 0 24 24">
+        <path d="M12 2a3 3 0 0 0-3 3c0 1.31.84 2.42 2 2.83V11H9a1 1 0 0 0-1 1v1h2v7.17c-2.3-.43-4.2-2.12-4.8-4.37l1.93-.52a1 1 0 0 0 .7-1.22 1 1 0 0 0-1.23-.7l-3.87 1.04a1 1 0 0 0-.7 1.22C2.9 19.33 5.92 21.75 9.5 22h5c3.58-.25 6.6-2.67 7.47-6.38a1 1 0 0 0-.7-1.22l-3.87-1.04a1 1 0 0 0-1.23.7 1 1 0 0 0 .7 1.22l1.93.52c-.6 2.25-2.5 3.94-4.8 4.37V13h2v-1a1 1 0 0 0-1-1h-2V7.83c1.16-.41 2-1.52 2-2.83a3 3 0 0 0-3-3zm0 2a1 1 0 1 1 0 2 1 1 0 0 1 0-2z"/>
+      </svg>
+      <span>Spine 2D</span>
+    </div>
+
+    <!-- Prominent Character & Skin Banner -->
+    <div id="model-info-banner" class="model-info-banner" style="display: none;">
+      <span id="model-ship-name" class="model-ship-title">Ship</span>
+      <span class="model-title-sep">—</span>
+      <span id="model-skin-name" class="model-skin-title">Skin</span>
+      <span id="model-skin-type" class="model-skin-badge" style="display: none;"></span>
+      <span id="model-prefab-badge" class="char-tag">id</span>
+    </div>
+
+    <div class="search-group">
+      <svg class="search-icon" viewBox="0 0 24 24">
+        <path d="M10 2a8 8 0 0 1 6.32 12.9l5.39 5.38a1 1 0 0 1-1.42 1.42l-5.38-5.39A8 8 0 1 1 10 2zm0 2a6 6 0 1 0 0 12 6 6 0 0 0 0-12z"/>
+      </svg>
+      <input type="text" id="character-search" class="search-input" placeholder="Search ship or skin (e.g. Shoukaku, Crane's Gratitude, 2B)..." autocomplete="off" />
+      <div id="character-dropdown" class="character-dropdown"></div>
+    </div>
+
+    <div class="header-actions">
+      <button id="btn-variant" class="btn" style="display: none;" title="Toggle censored/uncensored model variant">Variant: Standard</button>
+      <button id="btn-screenshot" class="btn" title="Save snapshot PNG (Key: S)">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><path d="M4 4h3l2-2h6l2 2h3a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2zm8 3a5 5 0 1 0 0 10 5 5 0 0 0 0-10zm0 2a3 3 0 1 1 0 6 3 3 0 0 1 0-6z"/></svg>
+        Snapshot
+      </button>
+    </div>
+  </header>
+
+  <!-- Controls Dock (Bottom) -->
+  <div class="controls-dock glass-panel">
+    <!-- Playback bar -->
+    <div class="playback-bar">
+      <button id="btn-play-pause" class="btn btn-icon btn-primary" title="Play/Pause (Space)">
+        <svg id="icon-play" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="display:none"><path d="M8 5v14l11-7z"/></svg>
+        <svg id="icon-pause" width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>
+      </button>
+
+      <button id="btn-loop" class="btn btn-icon active" title="Toggle loop">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M12 4V1L8 5l4 4V6c3.31 0 6 2.69 6 6 0 1.01-.25 1.97-.7 2.8l1.46 1.46A7.93 7.93 0 0 0 20 12c0-4.42-3.58-8-8-8zm0 14c-3.31 0-6-2.69-6-6 0-1.01.25-1.97.7-2.8L5.24 7.74A7.93 7.93 0 0 0 4 12c0 4.42 3.58 8 8 8v3l4-4-4-4v3z"/></svg>
+      </button>
+
+      <select id="select-animation" class="select-dropdown" style="min-width: 170px;" title="Select Animation">
+        <option value="">No animation</option>
+      </select>
+
+      <div class="timeline-container">
+        <input type="range" id="scrubber" class="scrubber" min="0" max="1" step="0.01" value="0" />
+        <span id="time-display" class="time-label">0.00s / 0.00s</span>
+      </div>
+
+      <select id="select-speed" class="select-dropdown" style="width: 82px;" title="Playback speed">
+        <option value="0.25">0.25x</option>
+        <option value="0.5">0.5x</option>
+        <option value="1.0" selected>1.0x</option>
+        <option value="1.5">1.5x</option>
+        <option value="2.0">2.0x</option>
+      </select>
+    </div>
+
+    <!-- Options and Viewport settings -->
+    <div class="options-row">
+      <div class="toggle-group">
+        <div class="active-skin-display" title="Active Character Skin">
+          <span class="skin-label">Skin:</span>
+          <span id="active-skin-title" class="skin-name-text">—</span>
+        </div>
+
+        <label id="spine-rig-container" class="toggle-label" style="display: none;" title="Spine internal attachment skin">
+          Rig:
+          <select id="select-skin" class="select-dropdown" style="height: 30px; padding: 0 6px;">
+            <option value="default">default</option>
+          </select>
+        </label>
+        <label id="spine-layer-container" class="toggle-label" style="display: none;" title="Layer visibility">
+          Layer:
+          <select id="select-layer" class="select-dropdown" style="height: 30px; padding: 0 6px;">
+            <option value="all">All Layers (Combined)</option>
+          </select>
+        </label>
+
+        <label class="toggle-label" title="Render Quality & Supersampling (SSAA)">
+          Quality:
+          <select id="select-scale" class="select-dropdown" style="height: 30px; padding: 0 6px;">
+            <option value="1.0">1x Native</option>
+            <option value="1.5" selected>1.5x Sharp</option>
+            <option value="2.0">2x Ultra (SSAA)</option>
+          </select>
+        </label>
+
+        <label class="toggle-label" title="Background style">
+          BG:
+          <select id="select-bg" class="select-dropdown" style="height: 30px; padding: 0 6px;">
+            <option value="bg-checkerboard">Checkerboard</option>
+            <option value="bg-dark">Slate Dark</option>
+            <option value="bg-black">Pure Black</option>
+            <option value="bg-white">Pure White</option>
+          </select>
+        </label>
+      </div>
+
+      <div class="toggle-group">
+        <label class="toggle-label">
+          <input type="checkbox" id="chk-pma" checked /> Premultiplied Alpha
+        </label>
+        <label class="toggle-label">
+          <input type="checkbox" id="chk-bones" /> Bones
+        </label>
+        <button id="btn-reset-view" class="btn" style="height: 30px; padding: 0 10px;" title="Center character (Key: R)">Reset View</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Loading Screen -->
+  <div id="loading-overlay">
+    <div class="spinner"></div>
+    <div id="loading-text">Loading Spine Model...</div>
+  </div>
+
+  <!-- Toast Notification -->
+  <div id="toast"></div>
+
+  <script>
+    // Global State
+    let characters = [];
+    let currentModel = null;
+    let currentVariant = null; // null or '_hx'
+    let availableVariants = [];
+    let manifestData = null;
+
+    // Spine & WebGL Objects
+    let canvas, gl, sceneRenderer, assetManager;
+    let loadedLayers = []; // [{ id, role, order, skeleton, animState, skeletonData, activeTrack, atlas }]
+    let skeleton = null;
+    let animState = null;
+    let activeTrack = null;
+    // Camera / Pan & Zoom State
+    let isDragging = false;
+    let dragStartX = 0, dragStartY = 0;
+    let camStartX = 0, camStartY = 0;
+    let isPlaying = true;
+    let isLooping = true;
+    let isScrubbing = false;
+    let lastFrameTime = Date.now();
+
+    // DOM Elements
+    const searchInput = document.getElementById("character-search");
+    const dropdown = document.getElementById("character-dropdown");
+    const btnPlayPause = document.getElementById("btn-play-pause");
+    const iconPlay = document.getElementById("icon-play");
+    const iconPause = document.getElementById("icon-pause");
+    const btnLoop = document.getElementById("btn-loop");
+    const selectAnimation = document.getElementById("select-animation");
+    const selectSkin = document.getElementById("select-skin");
+    const selectLayer = document.getElementById("select-layer");
+    const spineLayerContainer = document.getElementById("spine-layer-container");
+    const selectSpeed = document.getElementById("select-speed");
+    const selectScale = document.getElementById("select-scale");
+    const selectBg = document.getElementById("select-bg");
+    const scrubber = document.getElementById("scrubber");
+    const timeDisplay = document.getElementById("time-display");
+    const chkPma = document.getElementById("chk-pma");
+    const chkBones = document.getElementById("chk-bones");
+    const btnResetView = document.getElementById("btn-reset-view");
+    const btnScreenshot = document.getElementById("btn-screenshot");
+    const btnVariant = document.getElementById("btn-variant");
+    const loadingOverlay = document.getElementById("loading-overlay");
+    const loadingText = document.getElementById("loading-text");
+    const toast = document.getElementById("toast");
+    const canvasContainer = document.getElementById("canvas-container");
+    function showToast(msg) {
+      toast.textContent = msg;
+      toast.classList.add("show");
+      setTimeout(() => toast.classList.remove("show"), 2500);
+    }
+
+    function showLoading(msg) {
+      loadingText.textContent = msg;
+      loadingOverlay.classList.add("active");
+    }
+
+    function hideLoading() {
+      loadingOverlay.classList.remove("active");
+    }
+
+    // Initialize WebGL and Spine runtime
+    function initWebGL() {
+      canvas = document.getElementById("spine-canvas");
+      const ctxAttribs = {
+        alpha: true,
+        antialias: true,
+        premultipliedAlpha: false,
+        preserveDrawingBuffer: true,
+        powerPreference: "high-performance",
+      };
+
+      // Prefer WebGL 2 for full NPOT mipmapping and hardware anti-aliasing
+      gl = canvas.getContext("webgl2", ctxAttribs) ||
+           canvas.getContext("webgl", ctxAttribs) ||
+           canvas.getContext("experimental-webgl", ctxAttribs);
+
+      if (!gl) {
+        alert("WebGL is not supported in this browser.");
+        return;
+      }
+      // Preserve exact 100% bit-accurate texture colors (prevent browser gamma/colorspace drift)
+      try {
+        gl.pixelStorei(gl.UNPACK_COLORSPACE_CONVERSION_WEBGL, gl.NONE);
+      } catch (_) {}
+
+      // Configure high-quality texture filtering: trilinear mipmapping & anisotropic filtering
+      setupTextureFilteringEnhancements();
+
+      sceneRenderer = new spine.webgl.SceneRenderer(canvas, gl);
+      assetManager = new spine.webgl.AssetManager(gl);
+
+      window.addEventListener("resize", resizeCanvas);
+      if (selectScale) {
+        selectScale.addEventListener("change", resizeCanvas);
+      }
+      resizeCanvas();
+      setupInteractions();
+      requestAnimationFrame(renderLoop);
+    }
+
+    function setupTextureFilteringEnhancements() {
+      if (!window.spine || !window.spine.webgl) return;
+
+      // Patch SceneRenderer.resize so it does not overwrite canvas.width / supersampled buffer
+      if (spine.webgl.SceneRenderer) {
+        spine.webgl.SceneRenderer.prototype.resize = function (resizeMode) {
+          const gl = this.context.gl;
+          gl.viewport(0, 0, this.canvas.width, this.canvas.height);
+          if (resizeMode === spine.webgl.ResizeMode.Expand) {
+            this.camera.setViewport(this.canvas.clientWidth, this.canvas.clientHeight);
+          }
+        };
+      }
+
+      if (!spine.webgl.GLTexture) return;
+
+      const ext = gl.getExtension("EXT_texture_filter_anisotropic") ||
+                  gl.getExtension("WEBKIT_EXT_texture_filter_anisotropic") ||
+                  gl.getExtension("MOZ_EXT_texture_filter_anisotropic");
+      const maxAniso = ext ? (gl.getParameter(ext.MAX_TEXTURE_MAX_ANISOTROPY_EXT) || 4) : 0;
+
+      // Patch setFilters: upgrade linear minification to trilinear mipmap filter
+      const origSetFilters = spine.webgl.GLTexture.prototype.setFilters;
+      spine.webgl.GLTexture.prototype.setFilters = function (minFilter, magFilter) {
+        // Upgrade Linear (9729) or Nearest to trilinear MipMapLinearLinear (9987)
+        if (minFilter === 9729 || minFilter === spine.TextureFilter.Linear) {
+          minFilter = spine.TextureFilter.MipMapLinearLinear;
+        }
+        origSetFilters.call(this, minFilter, magFilter);
+
+        // Ensure mipmap generation and anisotropic filtering on GPU
+        const contextGl = this.context.gl;
+        this.bind();
+        try {
+          contextGl.generateMipmap(contextGl.TEXTURE_2D);
+        } catch (_) {}
+
+        if (ext && maxAniso > 1) {
+          contextGl.texParameterf(contextGl.TEXTURE_2D, ext.TEXTURE_MAX_ANISOTROPY_EXT, Math.min(maxAniso, 16));
+        }
+      };
+
+      // Patch update: always generate mipmaps when texture image is uploaded
+      const origUpdate = spine.webgl.GLTexture.prototype.update;
+      spine.webgl.GLTexture.prototype.update = function (useMipMaps) {
+        origUpdate.call(this, true);
+
+        const contextGl = this.context.gl;
+        this.bind();
+        contextGl.texParameteri(contextGl.TEXTURE_2D, contextGl.TEXTURE_MIN_FILTER, contextGl.LINEAR_MIPMAP_LINEAR);
+        contextGl.texParameteri(contextGl.TEXTURE_2D, contextGl.TEXTURE_MAG_FILTER, contextGl.LINEAR);
+        try {
+          contextGl.generateMipmap(contextGl.TEXTURE_2D);
+        } catch (_) {}
+
+        if (ext && maxAniso > 1) {
+          contextGl.texParameterf(contextGl.TEXTURE_2D, ext.TEXTURE_MAX_ANISOTROPY_EXT, Math.min(maxAniso, 16));
+        }
+      };
+    }
+    function resizeCanvas() {
+      const scale = selectScale ? (parseFloat(selectScale.value) || 1.5) : 1.5;
+      const dpr = Math.max(1, window.devicePixelRatio || 1) * scale;
+      const w = Math.round(canvas.clientWidth * dpr);
+      const h = Math.round(canvas.clientHeight * dpr);
+      if (canvas.width !== w || canvas.height !== h) {
+        canvas.width = w;
+        canvas.height = h;
+      }
+      if (sceneRenderer) {
+        sceneRenderer.resize(spine.webgl.ResizeMode.Expand);
+      }
+    }
+
+    // Pan and Zoom Interaction
+    function setupInteractions() {
+      canvasContainer.addEventListener("mousedown", (e) => {
+        if (e.button !== 0 && e.button !== 1) return;
+        isDragging = true;
+        canvasContainer.classList.add("grabbing");
+        dragStartX = e.clientX;
+        dragStartY = e.clientY;
+        if (sceneRenderer) {
+          camStartX = sceneRenderer.camera.position.x;
+          camStartY = sceneRenderer.camera.position.y;
+        }
+      });
+
+      window.addEventListener("mousemove", (e) => {
+        if (!isDragging || !sceneRenderer) return;
+        const dx = e.clientX - dragStartX;
+        const dy = e.clientY - dragStartY;
+        const zoom = sceneRenderer.camera.zoom;
+        // Invert dy because WebGL Y points up
+        sceneRenderer.camera.position.x = camStartX - dx * zoom;
+        sceneRenderer.camera.position.y = camStartY + dy * zoom;
+      });
+
+      window.addEventListener("mouseup", () => {
+        isDragging = false;
+        canvasContainer.classList.remove("grabbing");
+      });
+
+      canvasContainer.addEventListener("wheel", (e) => {
+        e.preventDefault();
+        if (!sceneRenderer) return;
+        const zoomFactor = e.deltaY > 0 ? 1.1 : 0.9;
+        sceneRenderer.camera.zoom = Math.max(0.05, Math.min(20.0, sceneRenderer.camera.zoom * zoomFactor));
+      }, { passive: false });
+
+      // Keyboard shortcuts
+      window.addEventListener("keydown", (e) => {
+        if (e.target.tagName === "INPUT" || e.target.tagName === "SELECT") return;
+        if (e.code === "Space") {
+          e.preventDefault();
+          togglePlayPause();
+        } else if (e.code === "KeyR") {
+          resetCamera();
+        } else if (e.code === "KeyS") {
+          captureScreenshot();
+        }
+      });
+    }
+
+    // Load character catalog from server
+    async function loadCharacters() {
+      try {
+        const resp = await fetch("/api/characters");
+        characters = await resp.json();
+        renderDropdown(characters);
+
+        // Auto-select xianghe_4 or first available character
+        const defaultChar = characters.find(c => c.id === "xianghe_4") || characters[0];
+        if (defaultChar) {
+          selectCharacter(defaultChar);
+        }
+      } catch (e) {
+        console.error("Failed to load character list:", e);
+        showToast("Error loading characters");
+      }
+    }
+
+    function updateModelDisplay(char) {
+      if (!char) return;
+      const banner = document.getElementById("model-info-banner");
+      if (banner) banner.style.display = "flex";
+      const shipEl = document.getElementById("model-ship-name");
+      if (shipEl) shipEl.textContent = char.ship_name;
+      const skinEl = document.getElementById("model-skin-name");
+      if (skinEl) skinEl.textContent = char.skin_name;
+      const badgeEl = document.getElementById("model-prefab-badge");
+      if (badgeEl) badgeEl.textContent = char.id;
+
+      const typeBadge = document.getElementById("model-skin-type");
+      if (typeBadge) {
+        if (char.skin_type && char.skin_type !== "Default" && char.skin_type !== "Others") {
+          typeBadge.textContent = char.skin_type;
+          typeBadge.style.display = "inline-block";
+        } else {
+          typeBadge.style.display = "none";
+        }
+      }
+
+      const activeSkinTitle = document.getElementById("active-skin-title");
+      if (activeSkinTitle) {
+        activeSkinTitle.textContent = char.skin_name;
+      }
+
+      document.title = `${char.ship_name} - "${char.skin_name}" | Azur Lane Spine 2D`;
+    }
+
+    function renderDropdown(items) {
+      dropdown.innerHTML = "";
+      if (items.length === 0) {
+        dropdown.innerHTML = `<div class="dropdown-item" style="color:var(--text-muted)">No matching models</div>`;
+        return;
+      }
+
+      items.forEach(c => {
+        const item = document.createElement("div");
+        item.className = "dropdown-item";
+        const skinTypeBadge = c.skin_type && c.skin_type !== "Default" && c.skin_type !== "Others"
+          ? `<span class="model-skin-badge">${c.skin_type}</span>`
+          : "";
+        item.innerHTML = `
+          <div style="display: flex; flex-direction: column; gap: 2px;">
+            <div style="display: flex; align-items: center; gap: 8px;">
+              <span class="char-name">${c.ship_name}</span>
+              <span class="char-tag">${c.id}</span>
+            </div>
+            <div style="display: flex; align-items: center; gap: 6px;">
+              <span class="char-skin">"${c.skin_name}"</span>
+              ${skinTypeBadge}
+            </div>
+          </div>
+        `;
+        item.addEventListener("click", () => {
+          selectCharacter(c);
+          dropdown.style.display = "none";
+        });
+        dropdown.appendChild(item);
+      });
+    }
+
+    searchInput.addEventListener("focus", () => {
+      dropdown.style.display = "block";
+    });
+
+    searchInput.addEventListener("input", () => {
+      const q = searchInput.value.trim().toLowerCase();
+      const filtered = characters.filter(c => 
+        c.ship_name.toLowerCase().includes(q) ||
+        c.skin_name.toLowerCase().includes(q) ||
+        (c.skin_type && c.skin_type.toLowerCase().includes(q)) ||
+        c.id.toLowerCase().includes(q)
+      );
+      renderDropdown(filtered);
+      dropdown.style.display = "block";
+    });
+
+    document.addEventListener("click", (e) => {
+      if (!searchInput.contains(e.target) && !dropdown.contains(e.target)) {
+        dropdown.style.display = "none";
+      }
+    });
+
+    function selectCharacter(char) {
+      currentModel = char;
+      currentVariant = null;
+      searchInput.value = `${char.ship_name} — "${char.skin_name}"`;
+      updateModelDisplay(char);
+      loadModel(char.id);
+    }
+    // Load Spine Model files
+    async function loadModel(prefabId) {
+      showLoading(`Loading ${prefabId}...`);
+      try {
+        const infoResp = await fetch(`/api/model/${prefabId}/info`);
+        manifestData = await infoResp.json();
+
+        // Determine available layers and check for censored variant (_hx)
+        const allLayers = manifestData.layers || [];
+        const hasHx = allLayers.some(l => l.is_hx);
+
+        if (hasHx) {
+          btnVariant.style.display = "inline-flex";
+          btnVariant.textContent = currentVariant === "_hx" ? "Variant: Censored (_hx)" : "Variant: Uncensored";
+        } else {
+          btnVariant.style.display = "none";
+        }
+
+        // Select active layers based on current variant:
+        // Group layers by their base role/part (e.g. weizhang_2T and weizhang_2T_hx share the same base)
+        const layerGroups = new Map();
+        for (const l of allLayers) {
+          const key = l.id.replace("_hx", "");
+          if (!layerGroups.has(key)) layerGroups.set(key, []);
+          layerGroups.get(key).push(l);
+        }
+
+        const activeLayerDefs = [];
+        for (const [key, variants] of layerGroups.entries()) {
+          if (currentVariant === "_hx") {
+            const hxLayer = variants.find(v => v.is_hx);
+            activeLayerDefs.push(hxLayer || variants[0]);
+          } else {
+            const normalLayer = variants.find(v => !v.is_hx);
+            activeLayerDefs.push(normalLayer || variants[0]);
+          }
+        }
+        activeLayerDefs.sort((a, b) => a.order - b.order);
+
+        // Update layer dropdown UI
+        selectLayer.innerHTML = '<option value="all">All Layers (Combined)</option>';
+        if (activeLayerDefs.length > 1) {
+          for (const l of activeLayerDefs) {
+            const opt = document.createElement("option");
+            opt.value = l.id;
+            opt.textContent = `${l.role} (${l.id})`;
+            selectLayer.appendChild(opt);
+          }
+          spineLayerContainer.style.display = "inline-flex";
+        } else {
+          spineLayerContainer.style.display = "none";
+        }
+        selectLayer.value = "all";
+
+        // Load all active layer assets through AssetManager
+        assetManager.removeAll();
+        for (const l of activeLayerDefs) {
+          assetManager.loadBinary(`/api/model/${prefabId}/files/${l.skel}`);
+          assetManager.loadTextureAtlas(`/api/model/${prefabId}/files/${l.atlas}`);
+        }
+
+        // Wait for download
+        await waitForAssets();
+
+        // Configure anisotropic filtering & mipmaps on all loaded atlases
+        const ext = gl.getExtension("EXT_texture_filter_anisotropic") ||
+                    gl.getExtension("WEBKIT_EXT_texture_filter_anisotropic") ||
+                    gl.getExtension("MOZ_EXT_texture_filter_anisotropic");
+        const maxAniso = ext ? (gl.getParameter(ext.MAX_TEXTURE_MAX_ANISOTROPY_EXT) || 4) : 0;
+
+        loadedLayers = [];
+        for (const l of activeLayerDefs) {
+          const atlasPath = `/api/model/${prefabId}/files/${l.atlas}`;
+          const skelPath = `/api/model/${prefabId}/files/${l.skel}`;
+          const atlas = assetManager.get(atlasPath);
+
+          if (atlas && atlas.pages) {
+            atlas.pages.forEach(page => {
+              const tex = page.texture;
+              if (tex) {
+                tex.bind();
+                gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
+                gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+                try {
+                  gl.generateMipmap(gl.TEXTURE_2D);
+                } catch (_) {}
+                if (ext && maxAniso > 1) {
+                  gl.texParameterf(gl.TEXTURE_2D, ext.TEXTURE_MAX_ANISOTROPY_EXT, Math.min(maxAniso, 16));
+                }
+              }
+            });
+          }
+
+          const atlasLoader = new spine.AtlasAttachmentLoader(atlas);
+          const binary = new spine.SkeletonBinary(atlasLoader);
+          const skelBytes = assetManager.get(skelPath);
+          const skeletonData = binary.readSkeletonData(new Uint8Array(skelBytes));
+
+          const skel = new spine.Skeleton(skeletonData);
+          skel.setToSetupPose();
+          skel.updateWorldTransform();
+
+          const animStateData = new spine.AnimationStateData(skeletonData);
+          animStateData.defaultMix = 0.25;
+          const animSt = new spine.AnimationState(animStateData);
+
+          loadedLayers.push({
+            id: l.id,
+            role: l.role,
+            order: l.order,
+            skeleton: skel,
+            skeletonData: skeletonData,
+            animState: animSt,
+            activeTrack: null,
+            atlas: atlas
+          });
+        }
+
+        // Pick primary layer (prefer Foreground / highest order)
+        const primaryLayer = loadedLayers[loadedLayers.length - 1];
+        skeleton = primaryLayer ? primaryLayer.skeleton : null;
+        animState = primaryLayer ? primaryLayer.animState : null;
+
+        // Populate animations dropdown (union across all layers, sorted with common ones first)
+        selectAnimation.innerHTML = "";
+        const animMap = new Map();
+        for (const l of loadedLayers) {
+          for (const a of l.skeletonData.animations) {
+            if (!animMap.has(a.name)) {
+              animMap.set(a.name, a.duration);
+            } else {
+              animMap.set(a.name, Math.max(animMap.get(a.name), a.duration));
+            }
+          }
+        }
+
+        animMap.forEach((duration, name) => {
+          const opt = document.createElement("option");
+          opt.value = name;
+          opt.textContent = `${name} (${duration.toFixed(2)}s)`;
+          selectAnimation.appendChild(opt);
+        });
+
+        // Populate Spine rig skins dropdown from primary layer
+        const rigContainer = document.getElementById("spine-rig-container");
+        selectSkin.innerHTML = "";
+        let initialSkin = "default";
+        if (primaryLayer && primaryLayer.skeletonData.skins && primaryLayer.skeletonData.skins.length > 1) {
+          const skin1 = primaryLayer.skeletonData.skins.find(s => s.name === "1");
+          const nonDefault = primaryLayer.skeletonData.skins.find(s => s.name !== "default");
+          initialSkin = skin1 ? skin1.name : (nonDefault ? nonDefault.name : "default");
+
+          primaryLayer.skeletonData.skins.forEach(s => {
+            const opt = document.createElement("option");
+            opt.value = s.name;
+            let label = s.name;
+            if (s.name === "1") label = "Outfit 1 (Default)";
+            else if (s.name === "2") label = "Outfit 2 (Variant)";
+            else if (s.name === "3") label = "Outfit 3 (Variant)";
+            else if (s.name === "default") label = "Base / Props";
+            opt.textContent = label;
+            selectSkin.appendChild(opt);
+          });
+          selectSkin.value = initialSkin;
+          if (rigContainer) rigContainer.style.display = "inline-flex";
+        } else {
+          if (rigContainer) rigContainer.style.display = "none";
+        }
+
+        applySkinToAllLayers(initialSkin);
+        // Set default animation ('normal' preferred)
+        const defaultAnimName = animMap.has("normal") ? "normal" : (animMap.keys().next().value || "");
+        if (defaultAnimName) {
+          selectAnimation.value = defaultAnimName;
+          applyAnimationToAllLayers(defaultAnimName);
+        }
+
+        resetCamera();
+        hideLoading();
+        showToast(`Loaded ${prefabId}`);
+      } catch (err) {
+        console.error("Error loading Spine model:", err);
+        hideLoading();
+        showToast(`Failed to load ${prefabId}: ${err.message}`);
+      }
+    }
+
+    function applyAnimationToAllLayers(animName) {
+      for (const l of loadedLayers) {
+        if (l.skeletonData.animations.some(a => a.name === animName)) {
+          l.activeTrack = l.animState.setAnimation(0, animName, isLooping);
+        } else if (l.skeletonData.animations.some(a => a.name === "normal")) {
+          l.activeTrack = l.animState.setAnimation(0, "normal", isLooping);
+        } else if (l.skeletonData.animations.length > 0) {
+          l.activeTrack = l.animState.setAnimation(0, l.skeletonData.animations[0].name, isLooping);
+        }
+      }
+      const primary = loadedLayers[loadedLayers.length - 1];
+      activeTrack = (primary && primary.activeTrack) ? primary.activeTrack : (loadedLayers.find(l => l.activeTrack)?.activeTrack || null);
+    }
+    function applySkinToAllLayers(skinName) {
+      for (const l of loadedLayers) {
+        if (l.skeletonData.skins.some(s => s.name === skinName)) {
+          l.skeleton.setSkinByName(skinName);
+        } else if (l.skeletonData.skins.some(s => s.name === "default")) {
+          l.skeleton.setSkinByName("default");
+        }
+        l.skeleton.setSlotsToSetupPose();
+      }
+    }
+
+
+    function waitForAssets() {
+      return new Promise((resolve, reject) => {
+        const check = () => {
+          if (assetManager.isLoadingComplete()) {
+            if (assetManager.hasErrors()) {
+              reject(new Error(JSON.stringify(assetManager.getErrors())));
+            } else {
+              resolve();
+            }
+          } else {
+            requestAnimationFrame(check);
+          }
+        };
+        check();
+      });
+    }
+
+    function resetCamera() {
+      if (loadedLayers.length === 0 || !sceneRenderer) return;
+
+      const activeLayers = selectLayer.value === "all"
+        ? loadedLayers
+        : loadedLayers.filter(l => l.id === selectLayer.value);
+
+      if (activeLayers.length === 0) return;
+
+      let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+
+      for (const l of activeLayers) {
+        l.skeleton.setToSetupPose();
+        l.skeleton.updateWorldTransform();
+        const offset = new spine.Vector2();
+        const size = new spine.Vector2();
+        l.skeleton.getBounds(offset, size, []);
+
+        if (size.x > 0 && size.y > 0) {
+          minX = Math.min(minX, offset.x);
+          minY = Math.min(minY, offset.y);
+          maxX = Math.max(maxX, offset.x + size.x);
+          maxY = Math.max(maxY, offset.y + size.y);
+        }
+      }
+
+      let centerX = (minX + maxX) / 2;
+      let centerY = (minY + maxY) / 2;
+      let boxW = maxX - minX;
+      let boxH = maxY - minY;
+
+      // If bounds are excessively large (>5000px), focus camera on character bones
+      const charLayer = loadedLayers[loadedLayers.length - 1];
+      if ((boxW > 5000 || boxH > 5000) && charLayer) {
+        let bMinX = Infinity, bMaxX = -Infinity, bMinY = Infinity, bMaxY = -Infinity;
+        let bCount = 0;
+        const bgKeywords = ["niao", "shui", "bj", "pangxie", "guang", "bg", "eff", "diban", "tian", "yun"];
+        for (let i = 0; i < charLayer.skeleton.bones.length; i++) {
+          const b = charLayer.skeleton.bones[i];
+          const bName = b.data.name.toLowerCase();
+          if (bgKeywords.some(k => bName.includes(k))) continue;
+          if (b.worldX < bMinX) bMinX = b.worldX;
+          if (b.worldX > bMaxX) bMaxX = b.worldX;
+          if (b.worldY < bMinY) bMinY = b.worldY;
+          if (b.worldY > bMaxY) bMaxY = b.worldY;
+          bCount++;
+        }
+        if (bCount > 5 && bMaxX > bMinX && bMaxY > bMinY) {
+          centerX = (bMinX + bMaxX) / 2;
+          centerY = (bMinY + bMaxY) / 2;
+          boxW = bMaxX - bMinX;
+          boxH = bMaxY - bMinY;
+        }
+      }
+
+      const canvasW = canvas.clientWidth;
+      const canvasH = canvas.clientHeight;
+      const fitW = (boxW || 1000) * 1.15;
+      const fitH = (boxH || 1000) * 1.15;
+
+      const zoom = Math.max(fitW / canvasW, fitH / canvasH);
+      sceneRenderer.camera.position.x = centerX;
+      sceneRenderer.camera.position.y = centerY;
+      sceneRenderer.camera.zoom = Math.max(0.2, zoom);
+    }
+
+    // Animation & Playback Controls
+    function togglePlayPause() {
+      isPlaying = !isPlaying;
+      iconPlay.style.display = isPlaying ? "none" : "block";
+      iconPause.style.display = isPlaying ? "block" : "none";
+    }
+
+    btnPlayPause.addEventListener("click", togglePlayPause);
+
+    btnLoop.addEventListener("click", () => {
+      isLooping = !isLooping;
+      btnLoop.classList.toggle("active", isLooping);
+      for (const l of loadedLayers) {
+        if (l.activeTrack) {
+          l.activeTrack.loop = isLooping;
+        }
+      }
+    });
+
+    selectAnimation.addEventListener("change", () => {
+      const name = selectAnimation.value;
+      if (name) {
+        applyAnimationToAllLayers(name);
+        scrubber.value = 0;
+      }
+    });
+
+    selectLayer.addEventListener("change", () => {
+      resetCamera();
+    });
+
+    selectSkin.addEventListener("change", () => {
+      applySkinToAllLayers(selectSkin.value);
+      resetCamera();
+    });
+
+    selectBg.addEventListener("change", () => {
+      canvasContainer.className = selectBg.value;
+    });
+
+    btnResetView.addEventListener("click", resetCamera);
+
+    btnVariant.addEventListener("click", () => {
+      currentVariant = currentVariant === "_hx" ? null : "_hx";
+      btnVariant.textContent = currentVariant === "_hx" ? "Variant: Censored (_hx)" : "Variant: Uncensored";
+      if (currentModel) {
+        loadModel(currentModel.id);
+      }
+    });
+
+    // Scrubber scrubbing
+    scrubber.addEventListener("input", () => {
+      isScrubbing = true;
+      const time = parseFloat(scrubber.value);
+      for (const l of loadedLayers) {
+        if (l.activeTrack) {
+          l.activeTrack.trackTime = time;
+        }
+        if (!isPlaying) {
+          l.animState.apply(l.skeleton);
+          l.skeleton.updateWorldTransform();
+        }
+      }
+    });
+
+    scrubber.addEventListener("change", () => {
+      isScrubbing = false;
+    });
+
+    // Screenshot PNG capture (high-resolution export at active canvas buffer resolution)
+    function captureScreenshot() {
+      if (!skeleton) return;
+      const dataUrl = canvas.toDataURL("image/png");
+      const a = document.createElement("a");
+      a.href = dataUrl;
+      const shipPart = currentModel ? currentModel.ship_name.replace(/[^a-zA-Z0-9_\- ]/g, "").trim().replace(/\s+/g, "_") : "Spine";
+      const skinPart = currentModel ? currentModel.skin_name.replace(/[^a-zA-Z0-9_\- ]/g, "").trim().replace(/\s+/g, "_") : "Skin";
+      const animPart = (selectAnimation.value || "pose").replace(/[^a-zA-Z0-9_\- ]/g, "").trim();
+      a.download = `${shipPart}_${skinPart}_${animPart}.png`;
+      a.click();
+      showToast(`Snapshot saved: ${a.download} (${canvas.width}x${canvas.height})`);
+    }
+
+    btnScreenshot.addEventListener("click", captureScreenshot);
+
+    // Main WebGL Render Loop
+    function renderLoop() {
+      const now = Date.now();
+      const delta = (now - lastFrameTime) / 1000;
+      lastFrameTime = now;
+
+      gl.clearColor(0, 0, 0, 0);
+      gl.clear(gl.COLOR_BUFFER_BIT);
+
+      if (loadedLayers.length > 0) {
+        const speed = parseFloat(selectSpeed.value) || 1.0;
+        const activeLayers = selectLayer.value === "all"
+          ? loadedLayers
+          : loadedLayers.filter(l => l.id === selectLayer.value);
+
+        for (const l of activeLayers) {
+          if (isPlaying && !isScrubbing) {
+            l.animState.timeScale = speed;
+            l.animState.update(delta);
+          } else {
+            l.animState.timeScale = 0;
+          }
+          l.animState.apply(l.skeleton);
+          l.skeleton.updateWorldTransform();
+        }
+
+        // Update timeline UI
+        if (activeTrack && activeTrack.animation) {
+          const duration = activeTrack.animation.duration;
+          const current = (activeTrack.trackTime % (duration || 1));
+          if (!isScrubbing) {
+            scrubber.max = duration;
+            scrubber.value = current;
+          }
+          timeDisplay.textContent = `${current.toFixed(2)}s / ${duration.toFixed(2)}s`;
+        }
+
+        const pma = chkPma.checked;
+        const showBones = chkBones.checked;
+
+        sceneRenderer.begin();
+        for (const l of activeLayers) {
+          sceneRenderer.drawSkeleton(l.skeleton, pma);
+          if (showBones) {
+            sceneRenderer.drawSkeletonDebug(l.skeleton, pma);
+          }
+        }
+        sceneRenderer.end();
+      }
+
+      requestAnimationFrame(renderLoop);
+    }
+
+    // Startup
+    window.addEventListener("DOMContentLoaded", () => {
+      initWebGL();
+      loadCharacters();
+    });
+  </script>
+</body>
+</html>
