@@ -1230,7 +1230,12 @@
         // Load all active layer assets through AssetManager
         assetManager.removeAll();
         for (const l of activeLayerDefs) {
-          assetManager.loadBinary(`/api/model/${prefabId}/files/${l.skel}`);
+          const isJson = l.is_json || l.skel.endsWith(".json");
+          if (isJson) {
+            assetManager.loadText(`/api/model/${prefabId}/files/${l.skel}`);
+          } else {
+            assetManager.loadBinary(`/api/model/${prefabId}/files/${l.skel}`);
+          }
           assetManager.loadTextureAtlas(`/api/model/${prefabId}/files/${l.atlas}`);
         }
 
@@ -1267,10 +1272,17 @@
           }
 
           const atlasLoader = new spine.AtlasAttachmentLoader(atlas);
-          const binary = new spine.SkeletonBinary(atlasLoader);
-          const skelBytes = assetManager.get(skelPath);
-          const skeletonData = binary.readSkeletonData(new Uint8Array(skelBytes));
-
+          let skeletonData;
+          const isJson = l.is_json || l.skel.endsWith(".json");
+          if (isJson) {
+            const jsonReader = new spine.SkeletonJson(atlasLoader);
+            const jsonText = assetManager.get(skelPath);
+            skeletonData = jsonReader.readSkeletonData(jsonText);
+          } else {
+            const binary = new spine.SkeletonBinary(atlasLoader);
+            const skelBytes = assetManager.get(skelPath);
+            skeletonData = binary.readSkeletonData(new Uint8Array(skelBytes));
+          }
           const skel = new spine.Skeleton(skeletonData);
           skel.setToSetupPose();
           skel.updateWorldTransform();

@@ -48,8 +48,7 @@ def pair_skels_and_atlases(skels: List[str], atlases: List[str]) -> List[Dict[st
       - Numbered (e.g. 1..7): Sequential layers (order 1..7)
     """
     def get_stem(filename: str) -> str:
-        return re.sub(r"\.(skel|skel\.bytes|atlas|atlas\.txt)$", "", filename)
-
+        return re.sub(r"\.(skel|skel\.bytes|atlas|atlas\.txt|json)$", "", filename)
     atlas_map = {get_stem(a): a for a in atlases}
 
     layers = []
@@ -88,10 +87,10 @@ def pair_skels_and_atlases(skels: List[str], atlases: List[str]) -> List[Dict[st
             "skel": s,
             "atlas": matched_atlas,
             "is_hx": is_hx,
+            "is_json": s.endswith(".json"),
             "order": order,
             "role": role,
         })
-
     layers.sort(key=lambda x: (x["is_hx"], x["order"]))
     return layers
 
@@ -240,7 +239,8 @@ def extract_spine_model(bundle_path: Path, cache_dir: Path, force: bool = False)
                     data["layers"] = pair_skels_and_atlases(data["skels"], data["atlases"])
                     with open(manifest_path, "w", encoding="utf-8") as fw:
                         json.dump(data, fw, indent=2)
-                return data
+                if data.get("layers") and data.get("skels"):
+                    return data
         except Exception:
             pass
 
@@ -260,6 +260,11 @@ def extract_spine_model(bundle_path: Path, cache_dir: Path, force: bool = False)
                 skels.append(name)
             elif name.endswith(".atlas") or name.endswith(".atlas.txt"):
                 atlases.append(name)
+            elif name.endswith(".json"):
+                skels.append(name)
+            elif content.lstrip().startswith(b"{") and (b'"skeleton"' in content[:500] or b'"bones"' in content[:1000]):
+                name = f"{name}.json"
+                skels.append(name)
         elif obj.type.name == "Texture2D":
             data = obj.read()
             name = getattr(data, "m_Name", getattr(data, "name", "texture"))
