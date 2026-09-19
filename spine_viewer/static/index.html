@@ -462,6 +462,118 @@
     .select-dropdown:focus {
       border-color: var(--primary);
     }
+    /* Custom Animation Dropdown */
+    .anim-dropdown-container {
+      position: relative;
+      display: inline-flex;
+      min-width: 170px;
+    }
+
+    .anim-dropdown-btn {
+      width: 100%;
+      height: 36px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      text-align: left;
+      white-space: nowrap;
+      overflow: hidden;
+      user-select: none;
+      padding: 0 10px;
+    }
+
+    .anim-dropdown-btn span {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      flex: 1;
+    }
+
+    .anim-chevron {
+      flex-shrink: 0;
+      color: var(--text-muted);
+      transition: transform 0.2s ease;
+    }
+
+    .anim-dropdown-container.open .anim-chevron {
+      transform: rotate(180deg);
+    }
+
+    .anim-dropdown-menu {
+      position: absolute;
+      bottom: calc(100% + 8px);
+      left: 0;
+      min-width: 230px;
+      max-width: 340px;
+      background: #161b22;
+      border: 1px solid var(--card-border);
+      border-radius: 8px;
+      box-shadow: 0 16px 36px rgba(0, 0, 0, 0.6);
+      z-index: 1000;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .anim-dropdown-search {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 10px;
+      border-bottom: 1px solid var(--card-border);
+      background: rgba(255, 255, 255, 0.04);
+    }
+
+    .anim-search-input {
+      flex: 1;
+      background: transparent;
+      border: none;
+      outline: none;
+      color: var(--text);
+      font-size: 12.5px;
+    }
+
+    .anim-options-list {
+      max-height: 280px;
+      overflow-y: auto;
+      padding: 4px 0;
+    }
+
+    .anim-options-list::-webkit-scrollbar {
+      width: 6px;
+    }
+    .anim-options-list::-webkit-scrollbar-track {
+      background: transparent;
+    }
+    .anim-options-list::-webkit-scrollbar-thumb {
+      background: rgba(255, 255, 255, 0.18);
+      border-radius: 3px;
+    }
+
+    .anim-opt-item {
+      padding: 7px 12px;
+      font-size: 13px;
+      color: var(--text);
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      transition: background 0.15s ease;
+      white-space: nowrap;
+    }
+
+    .anim-opt-item:hover {
+      background: rgba(88, 166, 255, 0.15);
+      color: #fff;
+    }
+
+    .anim-opt-item.active {
+      background: rgba(88, 166, 255, 0.25);
+      color: var(--primary);
+      font-weight: 600;
+    }
 
     .timeline-container {
       flex: 1;
@@ -659,9 +771,26 @@
         <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M12 4V1L8 5l4 4V6c3.31 0 6 2.69 6 6 0 1.01-.25 1.97-.7 2.8l1.46 1.46A7.93 7.93 0 0 0 20 12c0-4.42-3.58-8-8-8zm0 14c-3.31 0-6-2.69-6-6 0-1.01.25-1.97.7-2.8L5.24 7.74A7.93 7.93 0 0 0 4 12c0 4.42 3.58 8 8 8v3l4-4-4-4v3z"/></svg>
       </button>
 
-      <select id="select-animation" class="select-dropdown" style="min-width: 170px;" title="Select Animation">
-        <option value="">No animation</option>
-      </select>
+      <div id="anim-select-container" class="anim-dropdown-container">
+        <button id="btn-anim-select" class="select-dropdown anim-dropdown-btn" type="button" title="Select Animation">
+          <span id="anim-select-label">No animation</span>
+          <svg class="anim-chevron" width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M7 10l5 5 5-5z"/>
+          </svg>
+        </button>
+        <div id="anim-dropdown-menu" class="anim-dropdown-menu" style="display: none;">
+          <div id="anim-search-container" class="anim-dropdown-search" style="display: none;">
+            <svg class="search-icon" width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M10 2a8 8 0 0 1 6.32 12.9l5.39 5.38a1 1 0 0 1-1.42 1.42l-5.38-5.39A8 8 0 1 1 10 2zm0 2a6 6 0 1 0 0 12 6 6 0 0 0 0-12z"/>
+            </svg>
+            <input type="text" id="anim-search-input" class="anim-search-input" placeholder="Search animation..." autocomplete="off" />
+          </div>
+          <div id="anim-options-list" class="anim-options-list"></div>
+        </div>
+        <select id="select-animation" style="display: none;">
+          <option value="">No animation</option>
+        </select>
+      </div>
 
       <div class="timeline-container">
         <input type="range" id="scrubber" class="scrubber" min="0" max="1" step="0.01" value="0" />
@@ -2105,6 +2234,7 @@
     function playLive2DMotion(motionName) {
       if (!currentLive2DModel || !motionName) return;
       selectAnimation.value = motionName;
+      syncCustomAnimDropdown(motionName);
       // Reset timeline scrubber on new motion
       isScrubbing = false;
       scrubber.value = 0;
@@ -2261,6 +2391,7 @@
           scrubber.value = 0;
         }
       }
+      syncCustomAnimDropdown();
     });
     selectSpeed.addEventListener("change", () => {
       const speed = parseFloat(selectSpeed.value) || 1.0;
@@ -2268,6 +2399,124 @@
         live2dApp.ticker.speed = isPlaying ? speed : 0;
       }
     });
+    // Custom Animation Dropdown Controller
+    const animSelectContainer = document.getElementById("anim-select-container");
+    const btnAnimSelect = document.getElementById("btn-anim-select");
+    const animSelectLabel = document.getElementById("anim-select-label");
+    const animDropdownMenu = document.getElementById("anim-dropdown-menu");
+    const animSearchContainer = document.getElementById("anim-search-container");
+    const animSearchInput = document.getElementById("anim-search-input");
+    const animOptionsList = document.getElementById("anim-options-list");
+
+    function syncCustomAnimDropdown(selectedVal) {
+      if (!selectAnimation) return;
+      const activeVal = selectedVal !== undefined ? selectedVal : selectAnimation.value;
+      const opts = Array.from(selectAnimation.options);
+      const opt = opts.find(o => o.value === activeVal);
+      if (animSelectLabel) {
+        animSelectLabel.textContent = opt ? opt.textContent : (activeVal || "No animation");
+      }
+      renderAnimOptions(animSearchInput ? animSearchInput.value : "");
+    }
+    window.syncCustomAnimDropdown = syncCustomAnimDropdown;
+
+    function renderAnimOptions(filterQuery = "") {
+      if (!animOptionsList || !selectAnimation) return;
+      animOptionsList.innerHTML = "";
+      const q = (filterQuery || "").trim().toLowerCase();
+      const currentVal = selectAnimation.value;
+      const opts = Array.from(selectAnimation.options);
+
+      const filtered = q
+        ? opts.filter(o => o.textContent.toLowerCase().includes(q) || o.value.toLowerCase().includes(q))
+        : opts;
+
+      if (filtered.length === 0) {
+        animOptionsList.innerHTML = `<div style="padding: 12px; text-align: center; color: var(--text-muted); font-size: 12px;">No matching motions</div>`;
+        return;
+      }
+
+      filtered.forEach(o => {
+        const item = document.createElement("div");
+        item.className = "anim-opt-item" + (o.value === currentVal ? " active" : "");
+        item.textContent = o.textContent;
+        item.addEventListener("click", () => {
+          selectAnimation.value = o.value;
+          syncCustomAnimDropdown(o.value);
+          closeAnimDropdown();
+          selectAnimation.dispatchEvent(new Event("change"));
+        });
+        animOptionsList.appendChild(item);
+      });
+    }
+
+    function toggleAnimDropdown() {
+      if (animDropdownMenu && animDropdownMenu.style.display === "flex") {
+        closeAnimDropdown();
+      } else {
+        openAnimDropdown();
+      }
+    }
+
+    function openAnimDropdown() {
+      if (!animDropdownMenu || !selectAnimation) return;
+      if (selectAnimation.options.length > 8) {
+        animSearchContainer.style.display = "flex";
+      } else {
+        animSearchContainer.style.display = "none";
+      }
+      if (animSearchInput) animSearchInput.value = "";
+      renderAnimOptions();
+      animDropdownMenu.style.display = "flex";
+      if (animSelectContainer) animSelectContainer.classList.add("open");
+
+      setTimeout(() => {
+        const activeItem = animOptionsList.querySelector(".anim-opt-item.active");
+        if (activeItem) activeItem.scrollIntoView({ block: "nearest" });
+        if (selectAnimation.options.length > 8 && animSearchInput) {
+          animSearchInput.focus();
+        }
+      }, 30);
+    }
+
+    function closeAnimDropdown() {
+      if (animDropdownMenu) animDropdownMenu.style.display = "none";
+      if (animSelectContainer) animSelectContainer.classList.remove("open");
+    }
+
+    if (btnAnimSelect) {
+      btnAnimSelect.addEventListener("click", (e) => {
+        e.stopPropagation();
+        toggleAnimDropdown();
+      });
+    }
+
+    if (animSearchInput) {
+      animSearchInput.addEventListener("input", () => {
+        renderAnimOptions(animSearchInput.value);
+      });
+      animSearchInput.addEventListener("keydown", (e) => {
+        if (e.key === "Escape") {
+          closeAnimDropdown();
+        } else if (e.key === "Enter") {
+          const first = animOptionsList.querySelector(".anim-opt-item");
+          if (first) first.click();
+        }
+      });
+    }
+
+    document.addEventListener("click", (e) => {
+      if (animSelectContainer && !animSelectContainer.contains(e.target)) {
+        closeAnimDropdown();
+      }
+    });
+
+    if (selectAnimation) {
+      const animObserver = new MutationObserver(() => {
+        syncCustomAnimDropdown();
+      });
+      animObserver.observe(selectAnimation, { childList: true, subtree: true });
+    }
 
     selectLayer.addEventListener("change", () => {
       resetCamera();
