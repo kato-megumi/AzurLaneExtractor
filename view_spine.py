@@ -25,6 +25,12 @@ def main():
         help="Path to directory containing spinepainting asset bundles (default: D:\\Azurlane\\spinepainting)",
     )
     parser.add_argument(
+        "-l", "--live2d-dir",
+        type=Path,
+        default=Path(r"D:\Azurlane\live2d"),
+        help="Path to directory containing live2d asset bundles (default: D:\\Azurlane\\live2d)",
+    )
+    parser.add_argument(
         "-c", "--cache-dir",
         type=Path,
         default=Path(tempfile.gettempdir()) / "spine_cache",
@@ -61,6 +67,7 @@ def main():
 
     server_manager = SpineViewerServer(
         spine_dir=args.spine_dir,
+        live2d_dir=args.live2d_dir if args.live2d_dir.is_dir() else None,
         cache_dir=args.cache_dir,
         host=args.host,
         port=args.port,
@@ -72,7 +79,9 @@ def main():
     print("\n" + "=" * 60)
     print(f"  ⚓ Azur Lane Spine 2D Viewer Ready!")
     print(f"  URL: {url}")
-    print(f"  Spine Directory: {args.spine_dir}")
+    print(f"  Spine Directory:  {args.spine_dir}")
+    if args.live2d_dir.is_dir():
+        print(f"  Live2D Directory: {args.live2d_dir}")
     print("=" * 60 + "\n")
 
     if args.browser:

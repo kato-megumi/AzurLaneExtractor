@@ -3,7 +3,10 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Azur Lane Spine 2D Viewer</title>
+  <title>Azur Lane Live2D & Spine Viewer</title>
+  <script src="/static/live2dcubismcore.min.js"></script>
+  <script src="/static/pixi.min.js"></script>
+  <script src="/static/cubism4.min.js"></script>
   <script src="/static/spine-webgl.js"></script>
   <style>
     :root {
@@ -101,6 +104,7 @@
       font-weight: 700;
       letter-spacing: 0.5px;
       white-space: nowrap;
+      flex-shrink: 0;
     }
 
     .brand svg {
@@ -109,7 +113,8 @@
 
     .search-group {
       flex: 1;
-      max-width: 480px;
+      min-width: 220px;
+      max-width: 420px;
       position: relative;
     }
 
@@ -139,18 +144,106 @@
       fill: var(--text-muted);
       pointer-events: none;
     }
+    .search-clear-btn {
+      position: absolute;
+      right: 10px;
+      top: 50%;
+      transform: translateY(-50%);
+      background: none;
+      border: none;
+      color: var(--text-muted);
+      font-size: 16px;
+      line-height: 1;
+      cursor: pointer;
+      padding: 2px 6px;
+      border-radius: 4px;
+      display: none;
+    }
+
+    .search-clear-btn:hover {
+      color: var(--text);
+      background: rgba(255, 255, 255, 0.1);
+    }
+
+    .dropdown-header {
+      padding: 7px 14px;
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      background: #12161c;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+      position: sticky;
+      top: 0;
+      z-index: 2;
+    }
+    .engine-filter-group {
+      display: flex;
+      align-items: center;
+      background: rgba(13, 17, 23, 0.7);
+      border-radius: 8px;
+      padding: 2px;
+      gap: 2px;
+      border: 1px solid var(--card-border);
+      flex-shrink: 0;
+    }
+    .filter-btn {
+      background: transparent;
+      border: none;
+      color: var(--text-muted);
+      padding: 4px 10px;
+      font-size: 12px;
+      font-weight: 600;
+      border-radius: 6px;
+      cursor: pointer;
+      transition: all 0.15s ease;
+    }
+
+    .filter-btn:hover {
+      color: var(--text);
+      background: rgba(255, 255, 255, 0.05);
+    }
+
+    .filter-btn.active {
+      color: #ffffff;
+      background: var(--primary);
+    }
+
+    .engine-badge {
+      font-size: 10px;
+      font-weight: 700;
+      text-transform: uppercase;
+      padding: 2px 6px;
+      border-radius: 4px;
+      letter-spacing: 0.5px;
+      display: inline-block;
+    }
+
+    .engine-spine {
+      background: rgba(163, 113, 247, 0.2);
+      color: #d2a8ff;
+      border: 1px solid rgba(163, 113, 247, 0.4);
+    }
+
+    .engine-live2d {
+      background: rgba(56, 139, 253, 0.2);
+      color: #58a6ff;
+      border: 1px solid rgba(56, 139, 253, 0.4);
+    }
 
     .character-dropdown {
       position: absolute;
       top: 44px;
-      left: 0;
       right: 0;
-      max-height: 360px;
+      width: 420px;
+      max-width: calc(100vw - 32px);
+      max-height: 420px;
       overflow-y: auto;
       background: #161b22;
       border: 1px solid var(--card-border);
       border-radius: 8px;
-      box-shadow: 0 12px 28px rgba(0, 0, 0, 0.6);
+      box-shadow: 0 12px 32px rgba(0, 0, 0, 0.7);
       display: none;
       z-index: 100;
     }
@@ -200,20 +293,30 @@
       border-radius: 8px;
       font-size: 13.5px;
       white-space: nowrap;
+      min-width: 0;
+      max-width: 440px;
+      overflow: hidden;
+      flex-shrink: 1;
     }
 
     .model-ship-title {
       font-weight: 700;
       color: #fff;
+      white-space: nowrap;
+      flex-shrink: 0;
     }
 
     .model-title-sep {
       color: var(--text-muted);
+      flex-shrink: 0;
     }
 
     .model-skin-title {
       color: var(--primary);
       font-weight: 600;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
     }
 
     .model-skin-badge {
@@ -249,6 +352,7 @@
       display: flex;
       align-items: center;
       gap: 10px;
+      flex-shrink: 0;
     }
 
     /* Controls Dock (Bottom) */
@@ -469,6 +573,7 @@
   <!-- WebGL Rendering Canvas -->
   <div id="canvas-container" class="bg-checkerboard">
     <canvas id="spine-canvas"></canvas>
+    <canvas id="live2d-canvas" style="display: none; width: 100%; height: 100%;"></canvas>
   </div>
 
   <!-- Header -->
@@ -477,7 +582,7 @@
       <svg width="22" height="22" viewBox="0 0 24 24">
         <path d="M12 2a3 3 0 0 0-3 3c0 1.31.84 2.42 2 2.83V11H9a1 1 0 0 0-1 1v1h2v7.17c-2.3-.43-4.2-2.12-4.8-4.37l1.93-.52a1 1 0 0 0 .7-1.22 1 1 0 0 0-1.23-.7l-3.87 1.04a1 1 0 0 0-.7 1.22C2.9 19.33 5.92 21.75 9.5 22h5c3.58-.25 6.6-2.67 7.47-6.38a1 1 0 0 0-.7-1.22l-3.87-1.04a1 1 0 0 0-1.23.7 1 1 0 0 0 .7 1.22l1.93.52c-.6 2.25-2.5 3.94-4.8 4.37V13h2v-1a1 1 0 0 0-1-1h-2V7.83c1.16-.41 2-1.52 2-2.83a3 3 0 0 0-3-3zm0 2a1 1 0 1 1 0 2 1 1 0 0 1 0-2z"/>
       </svg>
-      <span>Spine 2D</span>
+      <span>Live2D & Spine</span>
     </div>
 
     <!-- Prominent Character & Skin Banner -->
@@ -489,11 +594,17 @@
       <span id="model-prefab-badge" class="char-tag">id</span>
     </div>
 
+    <div class="engine-filter-group">
+      <button class="filter-btn active" data-engine="all" id="filter-all">All</button>
+      <button class="filter-btn" data-engine="spine" id="filter-spine">Spine</button>
+      <button class="filter-btn" data-engine="live2d" id="filter-live2d">Live2D</button>
+    </div>
     <div class="search-group">
       <svg class="search-icon" viewBox="0 0 24 24">
         <path d="M10 2a8 8 0 0 1 6.32 12.9l5.39 5.38a1 1 0 0 1-1.42 1.42l-5.38-5.39A8 8 0 1 1 10 2zm0 2a6 6 0 1 0 0 12 6 6 0 0 0 0-12z"/>
       </svg>
-      <input type="text" id="character-search" class="search-input" placeholder="Search ship or skin (e.g. Shoukaku, Crane's Gratitude, 2B)..." autocomplete="off" />
+      <input type="text" id="character-search" class="search-input" placeholder="Search ship, skin, tag (e.g. Belfast, Alsace, bunny)..." autocomplete="off" />
+      <button id="btn-search-clear" class="search-clear-btn" style="display: none;" title="Clear search">✕</button>
       <div id="character-dropdown" class="character-dropdown"></div>
     </div>
 
@@ -585,6 +696,9 @@
         <label class="toggle-label">
           <input type="checkbox" id="chk-bones" /> Bones
         </label>
+        <label id="live2d-hitareas-container" class="toggle-label" style="display: none;" title="Show interactive touch areas">
+          <input type="checkbox" id="chk-hitareas" /> Hitboxes
+        </label>
         <button id="btn-reset-view" class="btn" style="height: 30px; padding: 0 10px;" title="Center character (Key: R)">Reset View</button>
       </div>
     </div>
@@ -601,18 +715,26 @@
 
   <script>
     // Global State
-    let characters = [];
-    let currentModel = null;
-    let currentVariant = null; // null or '_hx'
-    let availableVariants = [];
-    let manifestData = null;
-
+    var characters = [];
+    var currentModel = null;
+    var currentVariant = null; // null or '_hx'
+    var availableVariants = [];
+    var manifestData = null;
+    window.__L2D_VIEWER__ = {
+      get characters() { return characters; },
+      get currentModel() { return currentModel; },
+      get currentLive2DModel() { return currentLive2DModel; },
+      selectCharacter: (c) => selectCharacter(c),
+      triggerLive2DTouchReaction: (x, y) => triggerLive2DTouchReaction(x, y),
+      triggerLive2DDragReaction: (sx, sy, ex, ey, hits) => triggerLive2DDragReaction(sx, sy, ex, ey, hits),
+      updateLive2DHitAreasOverlay: () => updateLive2DHitAreasOverlay()
+    };
     // Spine & WebGL Objects
-    let canvas, gl, sceneRenderer, assetManager;
-    let loadedLayers = []; // [{ id, role, order, skeleton, animState, skeletonData, activeTrack, atlas }]
-    let skeleton = null;
-    let animState = null;
-    let activeTrack = null;
+    var canvas, gl, sceneRenderer, assetManager;
+    var loadedLayers = []; // [{ id, role, order, skeleton, animState, skeletonData, activeTrack, atlas }]
+    var skeleton = null;
+    var animState = null;
+    var activeTrack = null;
     // Camera / Pan & Zoom State
     let isDragging = false;
     let dragStartX = 0, dragStartY = 0;
@@ -621,9 +743,20 @@
     let isLooping = true;
     let isScrubbing = false;
     let lastFrameTime = Date.now();
+    // Live2D State
+    var live2dApp = null;
+    var currentLive2DModel = null;
+    var live2dDragging = false;
+    var live2dDragStart = { x: 0, y: 0 };
+    var live2dModelPos = { x: 0, y: 0 };
+    var live2dDragHitOnCharacter = false;
+    var live2dDragStartHits = [];
+    let activeFilterEngine = "all";
+    const spineRigContainer = document.getElementById("spine-rig-container");
 
     // DOM Elements
     const searchInput = document.getElementById("character-search");
+    const btnClearSearch = document.getElementById("btn-search-clear");
     const dropdown = document.getElementById("character-dropdown");
     const btnPlayPause = document.getElementById("btn-play-pause");
     const iconPlay = document.getElementById("icon-play");
@@ -638,8 +771,12 @@
     const selectBg = document.getElementById("select-bg");
     const scrubber = document.getElementById("scrubber");
     const timeDisplay = document.getElementById("time-display");
+    const timelineContainer = document.querySelector(".timeline-container");
     const chkPma = document.getElementById("chk-pma");
     const chkBones = document.getElementById("chk-bones");
+    const chkHitAreas = document.getElementById("chk-hitareas");
+    const live2dHitAreasContainer = document.getElementById("live2d-hitareas-container");
+    chkHitAreas?.addEventListener("change", updateLive2DHitAreasOverlay);
     const btnResetView = document.getElementById("btn-reset-view");
     const btnScreenshot = document.getElementById("btn-screenshot");
     const btnVariant = document.getElementById("btn-variant");
@@ -765,19 +902,32 @@
     function resizeCanvas() {
       const scale = selectScale ? (parseFloat(selectScale.value) || 1.5) : 1.5;
       const dpr = Math.max(1, window.devicePixelRatio || 1) * scale;
-      const w = Math.round(canvas.clientWidth * dpr);
-      const h = Math.round(canvas.clientHeight * dpr);
-      if (canvas.width !== w || canvas.height !== h) {
-        canvas.width = w;
-        canvas.height = h;
+
+      // 1. Spine canvas resize
+      if (canvas) {
+        const w = Math.round(canvas.clientWidth * dpr);
+        const h = Math.round(canvas.clientHeight * dpr);
+        if (canvas.width !== w || canvas.height !== h) {
+          canvas.width = w;
+          canvas.height = h;
+        }
+        if (sceneRenderer) {
+          sceneRenderer.resize(spine.webgl.ResizeMode.Expand);
+        }
       }
-      if (sceneRenderer) {
-        sceneRenderer.resize(spine.webgl.ResizeMode.Expand);
+
+      // 2. Live2D canvas resize
+      if (live2dApp && live2dApp.renderer) {
+        const container = document.getElementById("canvas-container");
+        live2dApp.renderer.resolution = dpr;
+        live2dApp.renderer.autoDensity = true;
+        live2dApp.renderer.resize(container.clientWidth, container.clientHeight);
       }
     }
 
     // Pan and Zoom Interaction
     function setupInteractions() {
+      canvasContainer.addEventListener("contextmenu", (e) => e.preventDefault());
       canvasContainer.addEventListener("mousedown", (e) => {
         if (e.button !== 0 && e.button !== 1) return;
         isDragging = true;
@@ -817,7 +967,9 @@
         if (e.target.tagName === "INPUT" || e.target.tagName === "SELECT") return;
         if (e.code === "Space") {
           e.preventDefault();
-          togglePlayPause();
+          if (currentModel && currentModel.engine === "spine") {
+            togglePlayPause();
+          }
         } else if (e.code === "KeyR") {
           resetCamera();
         } else if (e.code === "KeyS") {
@@ -831,6 +983,7 @@
       try {
         const resp = await fetch("/api/characters");
         characters = await resp.json();
+        window.characters = characters;
         renderDropdown(characters);
 
         // Auto-select xianghe_4 or first available character
@@ -880,16 +1033,27 @@
         return;
       }
 
+      const header = document.createElement("div");
+      header.className = "dropdown-header";
+      const engineLabel = activeFilterEngine === "all" ? "Models" : (activeFilterEngine === "live2d" ? "Live2D Models" : "Spine Models");
+      header.textContent = `Showing ${items.length} ${engineLabel}`;
+      dropdown.appendChild(header);
+
       items.forEach(c => {
         const item = document.createElement("div");
         item.className = "dropdown-item";
+        if (currentModel && currentModel.id === c.id) {
+          item.classList.add("active");
+        }
         const skinTypeBadge = c.skin_type && c.skin_type !== "Default" && c.skin_type !== "Others"
           ? `<span class="model-skin-badge">${c.skin_type}</span>`
           : "";
+        const engineBadge = `<span class="engine-badge engine-${c.engine}">${c.engine === 'live2d' ? 'Live2D' : 'Spine'}</span>`;
         item.innerHTML = `
           <div style="display: flex; flex-direction: column; gap: 2px;">
             <div style="display: flex; align-items: center; gap: 8px;">
               <span class="char-name">${c.ship_name}</span>
+              ${engineBadge}
               <span class="char-tag">${c.id}</span>
             </div>
             <div style="display: flex; align-items: center; gap: 6px;">
@@ -906,39 +1070,113 @@
       });
     }
 
+    function filterAndRenderDropdown() {
+      const q = searchInput.value.trim().toLowerCase();
+      const tokens = q ? q.split(/\s+/).filter(Boolean) : [];
+
+      const filtered = characters.filter(c => {
+        if (activeFilterEngine !== "all" && c.engine !== activeFilterEngine) {
+          return false;
+        }
+        if (tokens.length === 0) return true;
+
+        const searchable = `${c.ship_name} ${c.skin_name} ${c.skin_type || ''} ${c.id} ${c.engine} ${c.has_hx ? 'censored hx' : ''}`.toLowerCase();
+        return tokens.every(token => {
+          if (token === "l2d") return c.engine === "live2d";
+          if (token === "spine") return c.engine === "spine";
+          return searchable.includes(token);
+        });
+      });
+
+      renderDropdown(filtered);
+    }
+
     searchInput.addEventListener("focus", () => {
+      filterAndRenderDropdown();
       dropdown.style.display = "block";
     });
 
     searchInput.addEventListener("input", () => {
-      const q = searchInput.value.trim().toLowerCase();
-      const filtered = characters.filter(c => 
-        c.ship_name.toLowerCase().includes(q) ||
-        c.skin_name.toLowerCase().includes(q) ||
-        (c.skin_type && c.skin_type.toLowerCase().includes(q)) ||
-        c.id.toLowerCase().includes(q)
-      );
-      renderDropdown(filtered);
+      if (btnClearSearch) {
+        btnClearSearch.style.display = searchInput.value ? "block" : "none";
+      }
+      filterAndRenderDropdown();
       dropdown.style.display = "block";
     });
 
+    if (btnClearSearch) {
+      btnClearSearch.addEventListener("click", (e) => {
+        e.stopPropagation();
+        searchInput.value = "";
+        btnClearSearch.style.display = "none";
+        filterAndRenderDropdown();
+        searchInput.focus();
+      });
+    }
+
+    const filterBtns = document.querySelectorAll(".filter-btn");
+    filterBtns.forEach(btn => {
+      btn.addEventListener("click", () => {
+        filterBtns.forEach(b => b.classList.remove("active"));
+        btn.classList.add("active");
+        activeFilterEngine = btn.getAttribute("data-engine");
+        filterAndRenderDropdown();
+        dropdown.style.display = "block";
+      });
+    });
+
     document.addEventListener("click", (e) => {
-      if (!searchInput.contains(e.target) && !dropdown.contains(e.target)) {
+      if (!searchInput.contains(e.target) && !dropdown.contains(e.target) && (!btnClearSearch || !btnClearSearch.contains(e.target))) {
         dropdown.style.display = "none";
       }
     });
 
     function selectCharacter(char) {
+      // Cleanly reset interaction and playback states across character switches
+      isDragging = false;
+      live2dDragging = false;
+      live2dDragHitOnCharacter = false;
+      live2dDragStartHits = [];
+      canvasContainer.classList.remove("grabbing");
+      isScrubbing = false;
+      scrubber.value = 0;
+      isPlaying = true;
+      iconPlay.style.display = "none";
+      iconPause.style.display = "block";
+
       currentModel = char;
       currentVariant = null;
-      searchInput.value = `${char.ship_name} — "${char.skin_name}"`;
+      searchInput.value = "";
+      searchInput.placeholder = `${char.ship_name} — "${char.skin_name}"`;
+      if (btnClearSearch) btnClearSearch.style.display = "none";
       updateModelDisplay(char);
-      loadModel(char.id);
+      if (char.engine === "live2d") {
+        loadLive2DModel(char.id);
+      } else {
+        loadModel(char.id);
+      }
     }
+    window.selectCharacter = selectCharacter;
     // Load Spine Model files
     async function loadModel(prefabId) {
       showLoading(`Loading ${prefabId}...`);
       try {
+        // Switch active canvas to Spine
+        document.getElementById("live2d-canvas").style.display = "none";
+        document.getElementById("spine-canvas").style.display = "block";
+        if (currentLive2DModel && live2dApp) {
+          currentLive2DModel.internalModel?.motionManager?.stopAllMotions();
+          live2dApp.stage.removeChild(currentLive2DModel);
+          currentLive2DModel.destroy({ children: true });
+          currentLive2DModel = null;
+        }
+        chkPma.parentElement.style.display = "flex";
+        btnPlayPause.style.display = "";
+        btnLoop.style.display = "";
+        if (timelineContainer) timelineContainer.style.display = "";
+        selectSpeed.style.display = "";
+        chkBones.parentElement.style.display = "flex";
+        if (live2dHitAreasContainer) live2dHitAreasContainer.style.display = "none";
         const infoResp = await fetch(`/api/model/${prefabId}/info`);
         manifestData = await infoResp.json();
 
@@ -1121,6 +1359,625 @@
         showToast(`Failed to load ${prefabId}: ${err.message}`);
       }
     }
+    async function initLive2DApp() {
+      if (live2dApp) return;
+      const l2dCanvas = document.getElementById("live2d-canvas");
+      const container = document.getElementById("canvas-container");
+      const scale = selectScale ? (parseFloat(selectScale.value) || 1.5) : 1.5;
+      const dpr = Math.max(1, window.devicePixelRatio || 1) * scale;
+      live2dApp = new PIXI.Application({
+        view: l2dCanvas,
+        autoStart: true,
+        backgroundAlpha: 0,
+        resolution: dpr,
+        autoDensity: true,
+        antialias: true,
+        preserveDrawingBuffer: true,
+        width: container.clientWidth,
+        height: container.clientHeight
+      });
+
+      // Mouse tracking for Live2D focus (eye & head tracking)
+      container.addEventListener("pointermove", (e) => {
+        if (currentModel && currentModel.engine === "live2d" && currentLive2DModel) {
+          const rect = container.getBoundingClientRect();
+          const canvasX = e.clientX - rect.left;
+          const canvasY = e.clientY - rect.top;
+
+          if (live2dDragging) {
+            const dx = e.clientX - live2dDragStart.x;
+            const dy = e.clientY - live2dDragStart.y;
+            // Pan model if drag started outside character, or if holding Shift/Alt or using secondary/middle mouse buttons
+            if (!live2dDragHitOnCharacter || e.buttons !== 1 || e.shiftKey || e.altKey) {
+              currentLive2DModel.x = live2dModelPos.x + dx;
+              currentLive2DModel.y = live2dModelPos.y + dy;
+            } else {
+              // Interactive drag on character: eye and head track cursor
+              currentLive2DModel.focus(canvasX, canvasY);
+            }
+          } else {
+            currentLive2DModel.focus(canvasX, canvasY);
+          }
+        }
+      });
+
+      // Dragging and touch interaction for Live2D model
+      container.addEventListener("pointerdown", (e) => {
+        if (currentModel && currentModel.engine === "live2d" && currentLive2DModel) {
+          live2dDragging = true;
+          live2dDragStart = { x: e.clientX, y: e.clientY };
+          live2dModelPos = { x: currentLive2DModel.x, y: currentLive2DModel.y };
+
+          const rect = container.getBoundingClientRect();
+          const canvasX = e.clientX - rect.left;
+          const canvasY = e.clientY - rect.top;
+
+          if (e.button === 0 && !e.shiftKey && !e.altKey) {
+            const hits = currentLive2DModel.hitTest(canvasX, canvasY) || [];
+            live2dDragStartHits = hits;
+
+            const modelPos = new PIXI.Point();
+            currentLive2DModel.toModelPosition(new PIXI.Point(canvasX, canvasY), modelPos);
+            live2dDragHitOnCharacter = (hits.length > 0) || isPointOnLive2DCharacter(modelPos);
+          } else {
+            live2dDragHitOnCharacter = false;
+            live2dDragStartHits = [];
+          }
+          container.classList.add("grabbing");
+        }
+      });
+
+      window.addEventListener("pointerup", (e) => {
+        if (live2dDragging && currentModel && currentModel.engine === "live2d" && currentLive2DModel) {
+          const dist = Math.hypot(e.clientX - live2dDragStart.x, e.clientY - live2dDragStart.y);
+          const rect = container.getBoundingClientRect();
+          const canvasX = e.clientX - rect.left;
+          const canvasY = e.clientY - rect.top;
+
+          if (dist < 10) {
+            // Tap interaction on character (only with pure left click without modifier keys)!
+            if (e.button === 0 && !e.shiftKey && !e.altKey) {
+              triggerLive2DTouchReaction(canvasX, canvasY);
+            }
+          } else if (dist >= 25 && live2dDragHitOnCharacter && e.button === 0 && !e.shiftKey && !e.altKey) {
+            // Swipe/Drag gesture interaction!
+            const startCanvasX = live2dDragStart.x - rect.left;
+            const startCanvasY = live2dDragStart.y - rect.top;
+            triggerLive2DDragReaction(startCanvasX, startCanvasY, canvasX, canvasY, live2dDragStartHits);
+          }
+        }
+        live2dDragging = false;
+        live2dDragHitOnCharacter = false;
+        live2dDragStartHits = [];
+        container.classList.remove("grabbing");
+      });
+
+      function cancelLive2DDrag() {
+        if (live2dDragging) {
+          live2dDragging = false;
+          live2dDragHitOnCharacter = false;
+          live2dDragStartHits = [];
+          container.classList.remove("grabbing");
+        }
+        // Smoothly return character gaze to center when pointer leaves canvas
+        if (currentLive2DModel && currentLive2DModel.internalModel?.focusController) {
+          currentLive2DModel.internalModel.focusController.focus(0, 0, false);
+        }
+      }
+
+      container.addEventListener("pointerleave", cancelLive2DDrag);
+      window.addEventListener("pointercancel", cancelLive2DDrag);
+
+      // Zooming Live2D model
+      container.addEventListener("wheel", (e) => {
+        if (currentModel && currentModel.engine === "live2d" && currentLive2DModel) {
+          e.preventDefault();
+          const factor = e.deltaY < 0 ? 1.1 : 0.9;
+          currentLive2DModel.scale.x *= factor;
+          currentLive2DModel.scale.y *= factor;
+        }
+      }, { passive: false });
+    }
+
+
+    async function loadLive2DModel(prefabId) {
+      showLoading(`Loading Live2D ${prefabId}...`);
+      try {
+        await initLive2DApp();
+
+        // Switch active canvas to Live2D
+        document.getElementById("spine-canvas").style.display = "none";
+        document.getElementById("live2d-canvas").style.display = "block";
+
+        // Hide Spine-specific controls
+        spineRigContainer.style.display = "none";
+        spineLayerContainer.style.display = "none";
+        chkPma.parentElement.style.display = "none";
+        chkBones.parentElement.style.display = "none";
+        if (live2dHitAreasContainer) live2dHitAreasContainer.style.display = "flex";
+        btnPlayPause.style.display = "none";
+        btnLoop.style.display = "none";
+        if (timelineContainer) timelineContainer.style.display = "none";
+        selectSpeed.style.display = "none";
+
+        // Reset Spine active layers so Spine loop is dormant
+        loadedLayers = [];
+        skeleton = null;
+
+        if (currentLive2DModel) {
+          currentLive2DModel.internalModel?.motionManager?.stopAllMotions();
+          live2dApp.stage.removeChild(currentLive2DModel);
+          currentLive2DModel.destroy({ children: true });
+          currentLive2DModel = null;
+        }
+
+        let modelName = prefabId;
+        if (currentVariant === "_hx") {
+          modelName = prefabId + "_hx";
+        }
+
+        const modelUrl = `/api/live2d/${modelName}/files/model3.json`;
+        const model = await PIXI.live2d.Live2DModel.from(modelUrl, { autoInteract: true });
+
+        currentLive2DModel = model;
+        live2dApp.stage.addChild(model);
+        // Setup interactive hit areas for Live2D touch reactions
+        setupLive2DHitAreas(model);
+        // Setup parameter restoration & smooth damping across interaction transitions
+        setupLive2DParameterDamping(model);
+
+        // Configure high-quality anisotropic filtering & mipmapping on Live2D textures
+        try {
+          const gl = live2dApp.renderer.gl;
+          const ext = gl.getExtension("EXT_texture_filter_anisotropic") ||
+                      gl.getExtension("WEBKIT_EXT_texture_filter_anisotropic") ||
+                      gl.getExtension("MOZ_EXT_texture_filter_anisotropic");
+          const maxAniso = ext ? (gl.getParameter(ext.MAX_TEXTURE_MAX_ANISOTROPY_EXT) || 4) : 0;
+          const textures = model.textures || model.internalModel?.textures || [];
+          for (const tex of textures) {
+            const bt = tex?.baseTexture;
+            if (!bt) continue;
+            bt.mipmap = PIXI.MIPMAP_MODES.ON;
+            live2dApp.renderer.texture.bind(bt, 0);
+            const glTex = bt._glTextures ? bt._glTextures[live2dApp.renderer.CONTEXT_UID] : null;
+            if (glTex?.texture && ext && maxAniso > 1) {
+              gl.bindTexture(gl.TEXTURE_2D, glTex.texture);
+              gl.texParameterf(gl.TEXTURE_2D, ext.TEXTURE_MAX_ANISOTROPY_EXT, Math.min(maxAniso, 16));
+            }
+          }
+        } catch (e) {
+          console.warn("Failed to configure Live2D anisotropic filtering:", e);
+        }
+
+        // Suppress full-screen curtain / dark overlay meshes (e.g. wuqi_3 scene-darkening overlay)
+        try {
+          const core = model.internalModel?.coreModel;
+          const renderer = model.internalModel?.renderer;
+          if (core && renderer) {
+            const count = core.getDrawableCount();
+            const parentPartIndices = core._model?.drawables?.parentPartIndices;
+            const badDrawables = new Set();
+            const badParts = new Set();
+
+            for (let i = 0; i < count; i++) {
+              const blend = core.getDrawableBlendMode(i);
+              const v = core.getDrawableVertexPositions(i);
+              let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+              for (let j = 0; j < v.length; j += 2) {
+                minX = Math.min(minX, v[j]);
+                maxX = Math.max(maxX, v[j]);
+                minY = Math.min(minY, v[j + 1]);
+                maxY = Math.max(maxY, v[j + 1]);
+              }
+              const w = maxX - minX;
+              const h = maxY - minY;
+
+              // Detect giant multiply / blackout quads (> 60 units span)
+              if (blend === 2 && (w > 60 || h > 60)) {
+                badDrawables.add(i);
+                if (parentPartIndices) {
+                  badParts.add(parentPartIndices[i]);
+                }
+              }
+            }
+
+            if (badParts.size > 0 && parentPartIndices) {
+              for (let i = 0; i < count; i++) {
+                if (badParts.has(parentPartIndices[i])) {
+                  badDrawables.add(i);
+                }
+              }
+            }
+
+            if (badDrawables.size > 0) {
+              for (const p of badParts) {
+                core.setPartOpacityByIndex(p, 0);
+              }
+              console.log(`[Live2D] Suppressed ${badDrawables.size} fullscreen overlay mesh(es) in parts:`, Array.from(badParts));
+            }
+
+            // Dynamic filter: intercept drawMesh to suppress fullscreen curtain/wipe/blackout quads
+            const origDrawMesh = renderer.drawMesh;
+            renderer.drawMesh = function(t, e, i, indices, vertices, uvs, opacity, blend, isInverted) {
+              // Check for 4-vertex quads spanning all 4 viewport quadrants (> 80 units)
+              if (i === 4 && vertices) {
+                const gl = live2dApp?.renderer?.gl;
+                const fb = gl ? gl.getParameter(gl.FRAMEBUFFER_BINDING) : null;
+                if (!fb) {
+                  let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+                  for (let k = 0; k < vertices.length; k += 2) {
+                    minX = Math.min(minX, vertices[k]);
+                    maxX = Math.max(maxX, vertices[k]);
+                    minY = Math.min(minY, vertices[k + 1]);
+                    maxY = Math.max(maxY, vertices[k + 1]);
+                  }
+                  if (minX < -80 && maxX > 80 && minY < -80 && maxY > 80) {
+                    return; // Skip drawing giant fullscreen wipe/curtain quad!
+                  }
+                }
+              }
+              return origDrawMesh.apply(this, arguments);
+            };
+          }
+        } catch (e) {
+          console.warn("Failed to check Live2D overlay meshes:", e);
+        }
+        resetLive2DCamera();
+
+        // Variant button
+        if (currentModel.has_hx) {
+          btnVariant.style.display = "inline-flex";
+          btnVariant.textContent = currentVariant === "_hx" ? "Variant: Censored (_hx)" : "Variant: Uncensored";
+        } else {
+          btnVariant.style.display = "none";
+        }
+        // Populate animations dropdown with extracted Live2D motions
+        selectAnimation.innerHTML = "";
+        const mm = model.internalModel?.motionManager;
+        const definitions = mm?.definitions;
+        const motionGroups = definitions ? Object.keys(definitions) : [];
+
+        if (motionGroups.length > 0) {
+          const priority = (name) => {
+            const n = name.toLowerCase();
+            if (n === "idle") return 0;
+            if (n.startsWith("idle")) return 1;
+            if (n.startsWith("main")) return 2;
+            if (n.startsWith("touch_head")) return 3;
+            if (n.startsWith("touch_body")) return 4;
+            if (n.startsWith("touch_special")) return 5;
+            if (n.startsWith("touch")) return 6;
+            if (n.startsWith("login")) return 7;
+            if (n.startsWith("home")) return 8;
+            if (n.startsWith("wedding")) return 9;
+            return 20;
+          };
+          motionGroups.sort((a, b) => {
+            const pa = priority(a);
+            const pb = priority(b);
+            if (pa !== pb) return pa - pb;
+            return a.localeCompare(b);
+          });
+
+          motionGroups.forEach(mName => {
+            const opt = document.createElement("option");
+            opt.value = mName;
+            opt.textContent = mName;
+            selectAnimation.appendChild(opt);
+          });
+
+          const initialMotion = motionGroups.includes("idle") ? "idle" : (motionGroups.find(m => m.startsWith("idle")) || motionGroups[0]);
+          selectAnimation.value = initialMotion;
+          playLive2DMotion(initialMotion);
+          timeDisplay.textContent = `${motionGroups.length} motions loaded`;
+
+          // Listen for motion finish to support loop and automatic return to idle
+          mm.on("motionFinish", () => {
+            if (currentModel && currentModel.engine === "live2d" && currentLive2DModel) {
+              if (isLooping) {
+                const anim = selectAnimation.value;
+                if (anim) playLive2DMotion(anim);
+              } else {
+                const idleMotion = motionGroups.includes("idle") ? "idle" : (motionGroups.find(m => m.startsWith("idle")) || "");
+                if (idleMotion && selectAnimation.value !== idleMotion) {
+                  selectAnimation.value = idleMotion;
+                  playLive2DMotion(idleMotion);
+                }
+              }
+            }
+          });
+        } else {
+          selectAnimation.innerHTML = `<option value="">Tracking / Physics Only</option>`;
+          timeDisplay.textContent = "Live2D Active";
+        }
+        selectSkin.innerHTML = `<option value="default">Default</option>`;
+        hideLoading();
+        showToast(`Loaded Live2D: ${currentModel.ship_name}`);
+      } catch (err) {
+        hideLoading();
+        console.error("Failed to load Live2D model:", err);
+        showToast(`Failed to load Live2D: ${err.message}`);
+      }
+    }
+
+    function resetLive2DCamera() {
+      if (!currentLive2DModel) return;
+      const container = document.getElementById("canvas-container");
+      const cw = container.clientWidth;
+      const ch = container.clientHeight;
+
+      const mw = currentLive2DModel.width;
+      const mh = currentLive2DModel.height;
+      const scale = Math.min((cw * 0.8) / mw, (ch * 0.85) / mh);
+
+      currentLive2DModel.scale.set(scale);
+      currentLive2DModel.anchor.set(0.5, 0.5);
+      currentLive2DModel.x = cw / 2;
+      currentLive2DModel.y = ch / 2;
+
+      // Snap gaze and focus back to dead center
+      if (currentLive2DModel.internalModel?.focusController) {
+        currentLive2DModel.internalModel.focusController.focus(0, 0, true);
+      }
+      live2dDragging = false;
+      live2dDragHitOnCharacter = false;
+      live2dDragStartHits = [];
+      container.classList.remove("grabbing");
+    }
+
+    function setupLive2DHitAreas(model) {
+      if (!model || !model.internalModel || !model.internalModel.coreModel) return;
+      const im = model.internalModel;
+      const core = im.coreModel;
+      const ids = core._drawableIds || [];
+
+      im.hitAreas = {};
+      for (let i = 0; i < ids.length; i++) {
+        const id = ids[i];
+        if (/^Touch_?Head/i.test(id)) im.hitAreas["Head"] = { id, index: i };
+        else if (/^Touch_?Special/i.test(id)) im.hitAreas["Special"] = { id, index: i };
+        else if (/^Touch_?Body/i.test(id)) im.hitAreas["Body"] = { id, index: i };
+        else if (/^Touch_?Drag/i.test(id)) im.hitAreas[id] = { id, index: i };
+        else if (/^Touch_?Idle/i.test(id)) im.hitAreas[id] = { id, index: i };
+      }
+
+      // Semantic fallback if no explicit TouchHead/Special/Body found
+      if (!im.hitAreas["Head"]) {
+        const headIdx = ids.findIndex(id => /head|face|tou|lian/i.test(id));
+        if (headIdx !== -1) im.hitAreas["Head"] = { id: ids[headIdx], index: headIdx };
+      }
+      if (!im.hitAreas["Special"]) {
+        const specialIdx = ids.findIndex(id => /bust|chest|breast|xiong|oppai/i.test(id));
+        if (specialIdx !== -1) im.hitAreas["Special"] = { id: ids[specialIdx], index: specialIdx };
+      }
+      if (!im.hitAreas["Body"]) {
+        const bodyIdx = ids.findIndex(id => /body|shen/i.test(id));
+        if (bodyIdx !== -1) im.hitAreas["Body"] = { id: ids[bodyIdx], index: bodyIdx };
+      }
+
+      console.log(`[Live2D] Registered ${Object.keys(im.hitAreas).length} hit areas:`, Object.keys(im.hitAreas));
+      updateLive2DHitAreasOverlay();
+    }
+
+    function setupLive2DParameterDamping(model) {
+      if (!model || !model.internalModel || !model.internalModel.coreModel) return;
+      const im = model.internalModel;
+      const core = im.coreModel;
+      const count = core.getParameterCount();
+
+      // Cache model rest pose default values
+      const defaults = new Float32Array(count);
+      for (let i = 0; i < count; i++) {
+        defaults[i] = core.getParameterDefaultValue(i);
+      }
+
+      let lastTime = performance.now();
+
+      // Hook beforeMotionUpdate: smoothly decay unmanaged or lingering parameters
+      // toward their resting defaults (tau = 0.25s matching Azur Lane Live2dChar DampingTime)
+      im.on("beforeMotionUpdate", () => {
+        const now = performance.now();
+        const dt = Math.min((now - lastTime) / 1000, 0.1);
+        lastTime = now;
+
+        const factor = 1 - Math.exp(-dt / 0.25);
+
+        for (let i = 0; i < count; i++) {
+          const cur = core.getParameterValueByIndex(i);
+          const def = defaults[i];
+          const diff = def - cur;
+          if (Math.abs(diff) > 0.0001) {
+            if (Math.abs(diff) < 0.001) {
+              core.setParameterValueByIndex(i, def);
+            } else {
+              core.setParameterValueByIndex(i, cur + diff * factor);
+            }
+          }
+        }
+      });
+    }
+
+    function updateLive2DHitAreasOverlay() {
+      if (!currentLive2DModel || !currentLive2DModel.internalModel) return;
+      const existing = currentLive2DModel.children.find(c => c.name === "hitAreaDebug");
+      if (existing) {
+        currentLive2DModel.removeChild(existing);
+        existing.destroy();
+      }
+
+      if (!chkHitAreas || !chkHitAreas.checked) return;
+
+      const im = currentLive2DModel.internalModel;
+      if (!im.hitAreas) return;
+
+      const g = new PIXI.Graphics();
+      g.name = "hitAreaDebug";
+
+      const colors = {
+        Head: 0x00e5ff,      // cyan
+        Special: 0xff007f,   // magenta / hot pink
+        Body: 0x00e676,      // green
+        default: 0xffd600    // yellow for Drag / Idle
+      };
+
+      const b = {};
+      for (const [name, info] of Object.entries(im.hitAreas)) {
+        if (typeof info.index !== "number") continue;
+        im.getDrawableBounds(info.index, b);
+        if (b.width <= 0 || b.height <= 0) continue;
+
+        const color = colors[name] || (name.startsWith("TouchDrag") ? 0xffab00 : colors.default);
+        g.lineStyle(3, color, 0.85);
+        g.beginFill(color, 0.18);
+        g.drawRect(b.x, b.y, b.width, b.height);
+        g.endFill();
+      }
+
+      currentLive2DModel.addChild(g);
+    }
+    window.updateLive2DHitAreasOverlay = updateLive2DHitAreasOverlay;
+
+    function findMatchingLive2DMotion(candidates) {
+      if (!currentLive2DModel || !currentLive2DModel.internalModel) return null;
+      const mm = currentLive2DModel.internalModel.motionManager;
+      if (!mm || !mm.definitions) return null;
+      const available = Object.keys(mm.definitions);
+
+      // Exact match first
+      for (const c of candidates) {
+        if (available.includes(c)) return c;
+      }
+      // Case-insensitive match
+      for (const c of candidates) {
+        const found = available.find(a => a.toLowerCase() === c.toLowerCase());
+        if (found) return found;
+      }
+      // Substring match
+      for (const c of candidates) {
+        const found = available.find(a => a.toLowerCase().includes(c.toLowerCase()));
+        if (found) return found;
+      }
+      return null;
+    }
+
+    function isPointOnLive2DCharacter(modelPos) {
+      if (!currentLive2DModel || !currentLive2DModel.internalModel) return false;
+      const im = currentLive2DModel.internalModel;
+      const core = im.coreModel;
+      if (!core) return false;
+
+      const b = {};
+      const opacities = core.getDrawableOpacities ? core.getDrawableOpacities() : null;
+      for (let i = 0; i < core._drawableIds.length; i++) {
+        if (opacities && opacities[i] <= 0.05) continue;
+        im.getDrawableBounds(i, b);
+        if (b.width > im.originalWidth * 0.9 && b.height > im.originalHeight * 0.9) continue;
+        if (modelPos.x >= b.x && modelPos.x <= b.x + b.width &&
+            modelPos.y >= b.y && modelPos.y <= b.y + b.height) {
+          return true;
+        }
+      }
+      return false;
+    }
+
+    function triggerLive2DTouchReaction(canvasX, canvasY) {
+      if (!currentLive2DModel || !currentLive2DModel.internalModel) return;
+      const im = currentLive2DModel.internalModel;
+      const mm = im.motionManager;
+      if (!mm || !mm.definitions) return;
+
+      const hits = currentLive2DModel.hitTest(canvasX, canvasY) || [];
+      console.log("[Live2D] Tap at", canvasX, canvasY, "hits:", hits);
+
+      let targetMotion = null;
+      let hitLabel = "";
+
+      if (hits.includes("Head")) {
+        hitLabel = "Head";
+        targetMotion = findMatchingLive2DMotion(["touch_head", "touchHead", "touch", "main_1"]);
+      } else if (hits.includes("Special")) {
+        hitLabel = "Special";
+        targetMotion = findMatchingLive2DMotion(["touch_special", "touchSpecial", "touch_body", "touch", "main_2"]);
+      } else if (hits.includes("Body")) {
+        hitLabel = "Body";
+        targetMotion = findMatchingLive2DMotion(["touch_body", "touchBody", "touch", "main_3", "main_1"]);
+      } else if (hits.some(h => /Touch_?Drag/i.test(h))) {
+        const dragHit = hits.find(h => /Touch_?Drag/i.test(h));
+        const numMatch = dragHit?.match(/\d+/);
+        const candidates = [];
+        if (numMatch) {
+          candidates.push(`touch_drag${numMatch[0]}`, `touch_drag_${numMatch[0]}`);
+        }
+        candidates.push("touch_drag", "touch_special", "touch_body", "touch");
+        hitLabel = dragHit || "Drag Area";
+        targetMotion = findMatchingLive2DMotion(candidates);
+      } else if (hits.some(h => /Touch_?Idle/i.test(h))) {
+        const idleHit = hits.find(h => /Touch_?Idle/i.test(h));
+        const numMatch = idleHit?.match(/\d+/);
+        const candidates = [];
+        if (numMatch) {
+          candidates.push(`touch_idle${numMatch[0]}`, `touch_idle_${numMatch[0]}`);
+        }
+        candidates.push("touch_body", "touch", "main_1", "main_2", "main_3");
+        hitLabel = idleHit || "Touch";
+        targetMotion = findMatchingLive2DMotion(candidates);
+      } else {
+        // Fallback: check if clicked on any visible character mesh
+        const modelPos = new PIXI.Point();
+        currentLive2DModel.toModelPosition(new PIXI.Point(canvasX, canvasY), modelPos);
+        if (isPointOnLive2DCharacter(modelPos)) {
+          hitLabel = "Character";
+          targetMotion = findMatchingLive2DMotion(["touch_body", "touch", "main_1", "main_2", "main_3"]);
+        }
+      }
+
+      if (targetMotion) {
+        playLive2DMotion(targetMotion);
+        showToast(`🎯 ${hitLabel}: ${targetMotion}`);
+      }
+    }
+    window.triggerLive2DTouchReaction = triggerLive2DTouchReaction;
+
+    function triggerLive2DDragReaction(startX, startY, endX, endY, startHits) {
+      if (!currentLive2DModel || !currentLive2DModel.internalModel) return;
+      const im = currentLive2DModel.internalModel;
+      const mm = im.motionManager;
+      if (!mm || !mm.definitions) return;
+
+      // Prioritize specific TouchDrag number from initiating hit
+      const candidates = [];
+      for (const h of (startHits || [])) {
+        const m = h.match(/Touch_?Drag(\d+)/i);
+        if (m) {
+          candidates.push(`touch_drag${m[1]}`, `touch_drag_${m[1]}`);
+        }
+      }
+      candidates.push(
+        "touch_drag", "touch_drag1", "touch_drag2", "touch_drag3", "touch_drag4",
+        "touch_special", "touch_body"
+      );
+      const dragMotion = findMatchingLive2DMotion(candidates);
+
+      if (dragMotion) {
+        playLive2DMotion(dragMotion);
+        showToast(`👆 Drag Reaction: ${dragMotion}`);
+      }
+    }
+    window.triggerLive2DDragReaction = triggerLive2DDragReaction;
+
+    function playLive2DMotion(motionName) {
+      if (!currentLive2DModel || !motionName) return;
+      selectAnimation.value = motionName;
+      // Reset timeline scrubber on new motion
+      isScrubbing = false;
+      scrubber.value = 0;
+      try {
+        currentLive2DModel.motion(motionName, 0, 3);
+        showToast(`Playing: ${motionName}`);
+      } catch (e) {
+        console.warn("Failed to play Live2D motion:", motionName, e);
+      }
+    }
 
     function applyAnimationToAllLayers(animName) {
       for (const l of loadedLayers) {
@@ -1235,6 +2092,14 @@
       isPlaying = !isPlaying;
       iconPlay.style.display = isPlaying ? "none" : "block";
       iconPause.style.display = isPlaying ? "block" : "none";
+      if (currentModel && currentModel.engine === "live2d" && currentLive2DModel) {
+        if (isPlaying) {
+          const currentAnim = selectAnimation.value;
+          if (currentAnim) playLive2DMotion(currentAnim);
+        } else {
+          currentLive2DModel.internalModel?.motionManager?.stopAllMotions();
+        }
+      }
     }
 
     btnPlayPause.addEventListener("click", togglePlayPause);
@@ -1252,8 +2117,18 @@
     selectAnimation.addEventListener("change", () => {
       const name = selectAnimation.value;
       if (name) {
-        applyAnimationToAllLayers(name);
-        scrubber.value = 0;
+        if (currentModel && currentModel.engine === "live2d" && currentLive2DModel) {
+          playLive2DMotion(name);
+        } else {
+          applyAnimationToAllLayers(name);
+          scrubber.value = 0;
+        }
+      }
+    });
+    selectSpeed.addEventListener("change", () => {
+      const speed = parseFloat(selectSpeed.value) || 1.0;
+      if (currentModel && currentModel.engine === "live2d" && live2dApp && live2dApp.ticker) {
+        live2dApp.ticker.speed = isPlaying ? speed : 0;
       }
     });
 
@@ -1270,13 +2145,23 @@
       canvasContainer.className = selectBg.value;
     });
 
-    btnResetView.addEventListener("click", resetCamera);
+    btnResetView.addEventListener("click", () => {
+      if (currentModel && currentModel.engine === "live2d") {
+        resetLive2DCamera();
+      } else {
+        resetCamera();
+      }
+    });
 
     btnVariant.addEventListener("click", () => {
       currentVariant = currentVariant === "_hx" ? null : "_hx";
       btnVariant.textContent = currentVariant === "_hx" ? "Variant: Censored (_hx)" : "Variant: Uncensored";
       if (currentModel) {
-        loadModel(currentModel.id);
+        if (currentModel.engine === "live2d") {
+          loadLive2DModel(currentModel.id);
+        } else {
+          loadModel(currentModel.id);
+        }
       }
     });
 
@@ -1284,13 +2169,23 @@
     scrubber.addEventListener("input", () => {
       isScrubbing = true;
       const time = parseFloat(scrubber.value);
-      for (const l of loadedLayers) {
-        if (l.activeTrack) {
-          l.activeTrack.trackTime = time;
+      if (currentModel && currentModel.engine === "live2d" && currentLive2DModel) {
+        const qm = currentLive2DModel.internalModel?.motionManager?.queueManager;
+        const entry = qm?._motions?.[0];
+        if (entry) {
+          entry._stateTimeSeconds = time;
+          const duration = entry._motion?.getDuration ? entry._motion.getDuration() : 0;
+          timeDisplay.textContent = `${time.toFixed(2)}s / ${duration.toFixed(2)}s`;
         }
-        if (!isPlaying) {
-          l.animState.apply(l.skeleton);
-          l.skeleton.updateWorldTransform();
+      } else {
+        for (const l of loadedLayers) {
+          if (l.activeTrack) {
+            l.activeTrack.trackTime = time;
+          }
+          if (!isPlaying) {
+            l.animState.apply(l.skeleton);
+            l.skeleton.updateWorldTransform();
+          }
         }
       }
     });
@@ -1301,16 +2196,26 @@
 
     // Screenshot PNG capture (high-resolution export at active canvas buffer resolution)
     function captureScreenshot() {
-      if (!skeleton) return;
-      const dataUrl = canvas.toDataURL("image/png");
+      let dataUrl = null;
+      let w = 0, h = 0;
+      if (currentModel && currentModel.engine === "live2d" && live2dApp) {
+        dataUrl = live2dApp.view.toDataURL("image/png");
+        w = live2dApp.view.width;
+        h = live2dApp.view.height;
+      } else if (canvas && skeleton) {
+        dataUrl = canvas.toDataURL("image/png");
+        w = canvas.width;
+        h = canvas.height;
+      }
+      if (!dataUrl) return;
       const a = document.createElement("a");
       a.href = dataUrl;
-      const shipPart = currentModel ? currentModel.ship_name.replace(/[^a-zA-Z0-9_\- ]/g, "").trim().replace(/\s+/g, "_") : "Spine";
+      const shipPart = currentModel ? currentModel.ship_name.replace(/[^a-zA-Z0-9_\- ]/g, "").trim().replace(/\s+/g, "_") : "Model";
       const skinPart = currentModel ? currentModel.skin_name.replace(/[^a-zA-Z0-9_\- ]/g, "").trim().replace(/\s+/g, "_") : "Skin";
-      const animPart = (selectAnimation.value || "pose").replace(/[^a-zA-Z0-9_\- ]/g, "").trim();
-      a.download = `${shipPart}_${skinPart}_${animPart}.png`;
+      const typePart = currentModel?.engine || "2D";
+      a.download = `${shipPart}_${skinPart}_${typePart}.png`;
       a.click();
-      showToast(`Snapshot saved: ${a.download} (${canvas.width}x${canvas.height})`);
+      showToast(`Snapshot saved: ${a.download} (${w}x${h})`);
     }
 
     btnScreenshot.addEventListener("click", captureScreenshot);
@@ -1320,6 +2225,10 @@
       const now = Date.now();
       const delta = (now - lastFrameTime) / 1000;
       lastFrameTime = now;
+      if (currentModel && currentModel.engine === "live2d") {
+        requestAnimationFrame(renderLoop);
+        return;
+      }
 
       gl.clearColor(0, 0, 0, 0);
       gl.clear(gl.COLOR_BUFFER_BIT);
@@ -1343,13 +2252,23 @@
 
         // Update timeline UI
         if (activeTrack && activeTrack.animation) {
-          const duration = activeTrack.animation.duration;
-          const current = (activeTrack.trackTime % (duration || 1));
-          if (!isScrubbing) {
-            scrubber.max = duration;
-            scrubber.value = current;
+          const duration = activeTrack.animation.duration || 0;
+          if (duration <= 0.001) {
+            if (!isScrubbing) {
+              scrubber.max = 0;
+              scrubber.value = 0;
+              scrubber.disabled = true;
+            }
+            timeDisplay.textContent = "Static (0.00s)";
+          } else {
+            const current = (activeTrack.trackTime % duration);
+            if (!isScrubbing) {
+              scrubber.disabled = false;
+              scrubber.max = duration;
+              scrubber.value = current;
+            }
+            timeDisplay.textContent = `${current.toFixed(2)}s / ${duration.toFixed(2)}s`;
           }
-          timeDisplay.textContent = `${current.toFixed(2)}s / ${duration.toFixed(2)}s`;
         }
 
         const pma = chkPma.checked;
@@ -1363,16 +2282,40 @@
           }
         }
         sceneRenderer.end();
-      }
+      } else if (currentModel && currentModel.engine === "live2d" && currentLive2DModel) {
+        const speed = parseFloat(selectSpeed.value) || 1.0;
+        if (live2dApp && live2dApp.ticker) {
+          live2dApp.ticker.speed = isPlaying ? speed : 0;
+        }
 
+        const qm = currentLive2DModel.internalModel?.motionManager?.queueManager;
+        const entry = qm?._motions?.[0];
+        if (entry && !entry.isFinished()) {
+          const duration = entry._motion?.getDuration ? entry._motion.getDuration() : 0;
+          const current = entry.getStateTime ? entry.getStateTime() : 0;
+          if (duration > 0) {
+            if (!isScrubbing) {
+              scrubber.max = duration;
+              scrubber.value = Math.min(current, duration);
+            }
+            timeDisplay.textContent = `${Math.min(current, duration).toFixed(2)}s / ${duration.toFixed(2)}s`;
+          }
+        }
+      }
       requestAnimationFrame(renderLoop);
     }
 
     // Startup
-    window.addEventListener("DOMContentLoaded", () => {
+    function startup() {
       initWebGL();
       loadCharacters();
-    });
+    }
+
+    if (document.readyState === "loading") {
+      window.addEventListener("DOMContentLoaded", startup);
+    } else {
+      startup();
+    }
   </script>
 </body>
 </html>
