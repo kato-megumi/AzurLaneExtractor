@@ -259,7 +259,7 @@
       transition: background 0.15s;
     }
 
-    .dropdown-item:hover, .dropdown-item.active {
+    .dropdown-item:hover, .dropdown-item.active, .dropdown-item.highlighted {
       background: rgba(88, 166, 255, 0.15);
     }
 
@@ -297,6 +297,35 @@
       max-width: 440px;
       overflow: hidden;
       flex-shrink: 1;
+      user-select: text;
+      -webkit-user-select: text;
+    }
+
+    #model-prefab-badge {
+      font-size: 11px;
+      padding: 2px 7px;
+      border-radius: 4px;
+      background: rgba(255, 255, 255, 0.12);
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      color: var(--text-muted);
+      cursor: pointer;
+      user-select: all;
+      -webkit-user-select: all;
+      transition: all 0.15s ease;
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+    }
+
+    #model-prefab-badge:hover {
+      background: rgba(88, 166, 255, 0.25);
+      border-color: rgba(88, 166, 255, 0.6);
+      color: #fff;
+    }
+
+    #model-prefab-badge:active {
+      transform: scale(0.95);
+      background: rgba(88, 166, 255, 0.4);
     }
 
     .model-ship-title {
@@ -591,7 +620,7 @@
       <span class="model-title-sep">—</span>
       <span id="model-skin-name" class="model-skin-title">Skin</span>
       <span id="model-skin-type" class="model-skin-badge" style="display: none;"></span>
-      <span id="model-prefab-badge" class="char-tag">id</span>
+      <span id="model-prefab-badge" class="char-tag" title="Click to copy prefab ID">id</span>
     </div>
 
     <div class="engine-filter-group">
@@ -1006,7 +1035,10 @@
       const skinEl = document.getElementById("model-skin-name");
       if (skinEl) skinEl.textContent = char.skin_name;
       const badgeEl = document.getElementById("model-prefab-badge");
-      if (badgeEl) badgeEl.textContent = char.id;
+      if (badgeEl) {
+        badgeEl.textContent = char.id;
+        badgeEl.title = `Click to copy prefab ID (${char.id})`;
+      }
 
       const typeBadge = document.getElementById("model-skin-type");
       if (typeBadge) {
@@ -1026,7 +1058,12 @@
       document.title = `${char.ship_name} - "${char.skin_name}" | Azur Lane Spine 2D`;
     }
 
+    let currentDropdownItems = [];
+    let highlightedDropdownIndex = -1;
+
     function renderDropdown(items) {
+      currentDropdownItems = items;
+      highlightedDropdownIndex = -1;
       dropdown.innerHTML = "";
       if (items.length === 0) {
         dropdown.innerHTML = `<div class="dropdown-item" style="color:var(--text-muted)">No matching models</div>`;
@@ -1039,9 +1076,10 @@
       header.textContent = `Showing ${items.length} ${engineLabel}`;
       dropdown.appendChild(header);
 
-      items.forEach(c => {
+      items.forEach((c, idx) => {
         const item = document.createElement("div");
         item.className = "dropdown-item";
+        item.setAttribute("data-index", idx);
         if (currentModel && currentModel.id === c.id) {
           item.classList.add("active");
         }
@@ -1070,6 +1108,18 @@
       });
     }
 
+    function updateDropdownHighlight() {
+      const items = dropdown.querySelectorAll(".dropdown-item[data-index]");
+      items.forEach((item, i) => {
+        if (i === highlightedDropdownIndex) {
+          item.classList.add("highlighted");
+          item.scrollIntoView({ block: "nearest" });
+        } else {
+          item.classList.remove("highlighted");
+        }
+      });
+    }
+
     function filterAndRenderDropdown() {
       const q = searchInput.value.trim().toLowerCase();
       const tokens = q ? q.split(/\s+/).filter(Boolean) : [];
@@ -1080,9 +1130,10 @@
         }
         if (tokens.length === 0) return true;
 
-        const searchable = `${c.ship_name} ${c.skin_name} ${c.skin_type || ''} ${c.id} ${c.engine} ${c.has_hx ? 'censored hx' : ''}`.toLowerCase();
+        const tagsStr = (c.tags || []).join(' ');
+        const searchable = `${c.ship_name} ${c.skin_name} ${c.skin_type || ''} ${c.id} ${c.engine} ${tagsStr} ${c.has_hx ? 'censored hx' : ''}`.toLowerCase();
         return tokens.every(token => {
-          if (token === "l2d") return c.engine === "live2d";
+          if (token === "l2d" || token === "live2d") return c.engine === "live2d";
           if (token === "spine") return c.engine === "spine";
           return searchable.includes(token);
         });
@@ -1091,17 +1142,65 @@
       renderDropdown(filtered);
     }
 
-    searchInput.addEventListener("focus", () => {
+    function openDropdown() {
       filterAndRenderDropdown();
       dropdown.style.display = "block";
+      const activeItem = dropdown.querySelector(".dropdown-item.active");
+      if (activeItem) {
+        activeItem.scrollIntoView({ block: "nearest" });
+      }
+    }
+
+    searchInput.addEventListener("focus", () => {
+      openDropdown();
+      if (searchInput.value) {
+        searchInput.select();
+      }
+    });
+    searchInput.addEventListener("click", () => {
+      if (dropdown.style.display !== "block") {
+        openDropdown();
+      }
     });
 
     searchInput.addEventListener("input", () => {
       if (btnClearSearch) {
         btnClearSearch.style.display = searchInput.value ? "block" : "none";
       }
-      filterAndRenderDropdown();
-      dropdown.style.display = "block";
+      openDropdown();
+    });
+
+    searchInput.addEventListener("keydown", (e) => {
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        if (dropdown.style.display !== "block") {
+          openDropdown();
+        } else if (currentDropdownItems.length > 0) {
+          highlightedDropdownIndex = Math.min(highlightedDropdownIndex + 1, currentDropdownItems.length - 1);
+          updateDropdownHighlight();
+        }
+      } else if (e.key === "ArrowUp") {
+        e.preventDefault();
+        if (dropdown.style.display !== "block") {
+          openDropdown();
+        } else if (currentDropdownItems.length > 0) {
+          highlightedDropdownIndex = Math.max(highlightedDropdownIndex - 1, 0);
+          updateDropdownHighlight();
+        }
+      } else if (e.key === "Enter") {
+        if (dropdown.style.display === "block" && currentDropdownItems.length > 0) {
+          e.preventDefault();
+          const target = (highlightedDropdownIndex >= 0 && highlightedDropdownIndex < currentDropdownItems.length)
+            ? currentDropdownItems[highlightedDropdownIndex]
+            : currentDropdownItems[0];
+          selectCharacter(target);
+          dropdown.style.display = "none";
+          searchInput.blur();
+        }
+      } else if (e.key === "Escape") {
+        dropdown.style.display = "none";
+        searchInput.blur();
+      }
     });
 
     if (btnClearSearch) {
@@ -1109,7 +1208,7 @@
         e.stopPropagation();
         searchInput.value = "";
         btnClearSearch.style.display = "none";
-        filterAndRenderDropdown();
+        openDropdown();
         searchInput.focus();
       });
     }
@@ -1120,8 +1219,7 @@
         filterBtns.forEach(b => b.classList.remove("active"));
         btn.classList.add("active");
         activeFilterEngine = btn.getAttribute("data-engine");
-        filterAndRenderDropdown();
-        dropdown.style.display = "block";
+        openDropdown();
       });
     });
 
@@ -1130,6 +1228,31 @@
         dropdown.style.display = "none";
       }
     });
+    const prefabBadge = document.getElementById("model-prefab-badge");
+    if (prefabBadge) {
+      prefabBadge.addEventListener("click", async (e) => {
+        e.stopPropagation();
+        const id = prefabBadge.textContent.trim();
+        if (!id || id === "id") return;
+        try {
+          if (navigator.clipboard && navigator.clipboard.writeText) {
+            await navigator.clipboard.writeText(id);
+          } else {
+            const ta = document.createElement("textarea");
+            ta.value = id;
+            ta.style.position = "fixed";
+            ta.style.opacity = "0";
+            document.body.appendChild(ta);
+            ta.select();
+            document.execCommand("copy");
+            document.body.removeChild(ta);
+          }
+          showToast(`Copied prefab ID: ${id}`);
+        } catch (err) {
+          showToast(`Failed to copy: ${id}`);
+        }
+      });
+    }
 
     function selectCharacter(char) {
       // Cleanly reset interaction and playback states across character switches
@@ -1146,9 +1269,11 @@
 
       currentModel = char;
       currentVariant = null;
-      searchInput.value = "";
+      // Retain search query so user can switch between matching skins without re-typing
       searchInput.placeholder = `${char.ship_name} — "${char.skin_name}"`;
-      if (btnClearSearch) btnClearSearch.style.display = "none";
+      if (btnClearSearch) {
+        btnClearSearch.style.display = searchInput.value ? "block" : "none";
+      }
       updateModelDisplay(char);
       if (char.engine === "live2d") {
         loadLive2DModel(char.id);
