@@ -4890,26 +4890,9 @@ var spine;
 					return "";
 			}
 			byteCount--;
-			var chars = "";
-			var charCount = 0;
-			for (var i = 0; i < byteCount;) {
-				var b = this.readByte();
-				switch (b >> 4) {
-					case 12:
-					case 13:
-						chars += String.fromCharCode(((b & 0x1F) << 6 | this.readByte() & 0x3F));
-						i += 2;
-						break;
-					case 14:
-						chars += String.fromCharCode(((b & 0x0F) << 12 | (this.readByte() & 0x3F) << 6 | this.readByte() & 0x3F));
-						i += 3;
-						break;
-					default:
-						chars += String.fromCharCode(b);
-						i++;
-				}
-			}
-			return chars;
+			var bytes = new Uint8Array(this.buffer.buffer, this.buffer.byteOffset + this.index, byteCount);
+			this.index += byteCount;
+			return new TextDecoder("utf-8").decode(bytes);
 		};
 		BinaryInput.prototype.readFloat = function () {
 			var value = this.buffer.getFloat32(this.index);
